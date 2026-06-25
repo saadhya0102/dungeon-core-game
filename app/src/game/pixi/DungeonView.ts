@@ -189,6 +189,12 @@ export class DungeonView {
   renderBuild(run: RunState) {
     this.replaying = false;
     this.timeline = null;
+    // Clear any leftover combat visuals/state from a previous wave.
+    this.fxLayer.removeChildren();
+    this.fxItems = [];
+    this.projectiles = [];
+    this.spriteById.clear();
+    this.lastPos.clear();
     this.drawTiles(run);
     this.drawTraps(run);
     this.drawBuildUnits(run);

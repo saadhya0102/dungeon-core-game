@@ -8,6 +8,7 @@ import {
   capacityMax, capacityUsed, unlockedUnits, FAMILIES,
 } from "../sim";
 import type { ResearchBranch } from "../sim/types";
+import { abilityList, abilityTooltip } from "./abilityText";
 
 export function Panels() {
   const panel = useStore((s) => s.openPanel);
@@ -58,12 +59,19 @@ function UnitsPanel() {
                 const cost = unitCost(u);
                 const afford = run.dp >= cost;
                 const ok = isUnlocked && tierOk && afford;
+                const abilities = abilityList(u.abilities);
                 return (
                   <div key={u.id} className={`card ${ok ? "" : "locked"}`}
+                    title={abilityTooltip(u.abilities)}
                     onClick={() => { if (!ok) return; setTool("placeUnit", u.id, false); setPanel(null); }}>
                     <div className="name">{u.name}</div>
                     <div className="meta">T{u.tier} &middot; {u.role} &middot; {spaceCost(u.tier)} space</div>
                     <div className="meta">HP {u.stats.hp} &middot; DEF {u.stats.def} &middot; ATK {Math.max(u.stats.phys, u.stats.mag, u.stats.rng)}</div>
+                    {abilities.length > 0 && (
+                      <div className="small" style={{ color: "var(--accent)", margin: "2px 0" }}>
+                        {abilities.map((a) => a.name).join(" \u00b7 ")}
+                      </div>
+                    )}
                     <div className="cost">{cost} DP</div>
                     {!isUnlocked && <div className="small">Locked (research)</div>}
                     {isUnlocked && !tierOk && <div className="small">Needs Core Lv (T{u.tier})</div>}

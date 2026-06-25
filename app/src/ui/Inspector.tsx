@@ -4,6 +4,7 @@ import { UNIT_BY_ID } from "../sim/content/units";
 import { TRAP_BY_ID } from "../sim/content/traps";
 import { spaceCost } from "../sim";
 import type { GearItem, GearSlot } from "../sim/types";
+import { abilityList } from "./abilityText";
 
 const BANDS: [number, string][] = [[1.8, "S"], [1.5, "A"], [1.2, "B"], [1.0, "C"], [0.7, "D"], [0.4, "E"], [0.15, "F"]];
 function band(mult: number): string {
@@ -103,8 +104,16 @@ export function Inspector() {
             <span className="chip" key={k}>{k} {band(v as number)}</span>
           ))}
         </div>
-        {def.abilities && def.abilities.length > 0 && (
-          <div className="chips">{def.abilities.map((a, i) => <span className="chip" key={i}>{a.effect}</span>)}</div>
+        {abilityList(def.abilities).length > 0 && (
+          <>
+            <div className="section-title">Special Abilities</div>
+            {abilityList(def.abilities).map((a, i) => (
+              <div key={i} style={{ marginBottom: 3 }}>
+                <b className="chip" style={{ color: "var(--accent)" }}>{a.name}</b>{" "}
+                <span className="small">{a.desc}</span>
+              </div>
+            ))}
+          </>
         )}
 
         <div className="section-title">Equipment</div>
