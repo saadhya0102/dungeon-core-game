@@ -5,6 +5,7 @@ import type {
   RunState, WaveDef, Timeline, SimEntity, SimEvent, StatusSpec, StatusEffect,
   GearItem, AffinityType, Tier, Frame, EntityMeta,
 } from "./types";
+import { FLAG_FROZEN, FLAG_BERSERK, FLAG_INVIS } from "./types";
 import { CONFIG } from "./config";
 import { makePRNG, hashSeed } from "./rng";
 import type { PRNG } from "./rng";
@@ -144,7 +145,11 @@ function snapshotFrame(ctx: Ctx) {
   const ents = [];
   for (const e of [ctx.core, ...ctx.dungeon, ...ctx.invaders]) {
     if (e.state === "dead") continue;
-    ents.push({ id: e.id, x: Math.round(e.x * 100) / 100, y: Math.round(e.y * 100) / 100, hp: Math.max(0, Math.round(e.hp)), maxHp: e.maxHp });
+    let fl = 0;
+    if (isFrozen(e)) fl |= FLAG_FROZEN;
+    if (e.berserk) fl |= FLAG_BERSERK;
+    if (e.invisible) fl |= FLAG_INVIS;
+    ents.push({ id: e.id, x: Math.round(e.x * 100) / 100, y: Math.round(e.y * 100) / 100, hp: Math.max(0, Math.round(e.hp)), maxHp: e.maxHp, fl });
   }
   ctx.frames.push({ tick: ctx.tick, ents });
 }
@@ -163,13 +168,17 @@ function dist(a: SimEntity, b: SimEntity): number {
 }
 
 function isStunned(e: SimEntity): boolean {
-  return e.statuses.some((s) => s.kind === "stun" && s.remainingTicks > 0);
+  return e.statuses.some((s) => (s.kind === "stun" || s.kind === "freeze") && s.remainingTicks > 0);
+}
+
+function isFrozen(e: SimEntity): boolean {
+  return e.statuses.some((s) => s.kind === "freeze" && s.remainingTicks > 0);
 }
 
 function slowFactor(e: SimEntity): number {
   let f = 1;
   for (const s of e.statuses) {
-    if (s.kind === "root") return 0;
+    if (s.kind === "root" || s.kind === "freeze") return 0;
     if (s.kind === "slow") f = Math.min(f, 1 - s.magnitude);
   }
   return Math.max(0, f);
@@ -180,7 +189,8 @@ function effMoveSpeed(e: SimEntity): number {
 }
 
 function attackInterval(e: SimEntity): number {
-  return Math.max(2, Math.round(TICKS_PER_SEC * CONFIG.BASE_ATTACK_INTERVAL / Math.max(0.2, e.stats.atkSpeed)));
+  const spd = e.stats.atkSpeed * (e.berserk ? 1.3 : 1);
+  return Math.max(2, Math.round(TICKS_PER_SEC * CONFIG.BASE_ATTACK_INTERVAL / Math.max(0.2, spd)));
 }
 
 // --- Wave start: auras, summons, shields ---
@@ -445,6 +455,12 @@ function resolveAttack(ctx: Ctx, att: SimEntity, tgt: SimEntity) {
   let crit = false;
   if (ctx.rng.next() < att.stats.crit) { dmg *= att.stats.critMult; crit = true; }
 
+  // berserk: once below half HP, fights harder (faster + stronger)
+  if (!att.berserk && att.hp < att.maxHp * 0.5 && att.abilities.some((a) => a.effect === "berserk")) att.berserk = true;
+  if (att.berserk) dmg *= 1.4;
+  // first strike: a big bonus on this entity's very first hit
+  if (!att.firstAttackDone && att.abilities.some((a) => a.effect === "firstStrike")) { dmg *= 1.7; att.firstAttackDone = true; }
+
   // execute bonus
   if (att.abilities.some((a) => a.effect === "executeLowHp") && tgt.hp / tgt.maxHp < 0.25) dmg *= 1.6;
 
@@ -459,13 +475,17 @@ function resolveAttack(ctx: Ctx, att: SimEntity, tgt: SimEntity) {
     att.hp = Math.min(att.maxHp, att.hp + Math.round(dmg * att.stats.lifesteal));
   }
   // onHit abilities
+  const bigAoe = att.abilities.some((a) => a.effect === "bigAoe");
   for (const ab of att.abilities) {
     if (ab.trigger !== "onHit") continue;
     if (ab.effect === "slowOnHit") addStatus(tgt, { kind: "slow", magnitude: ab.params?.pct ?? 0.3, durationTicks: 20 }, att.id);
     else if (ab.effect === "poisonDot") addStatus(tgt, { kind: "poison", magnitude: ab.params?.dps ?? 6, durationTicks: 30 }, att.id);
+    else if (ab.effect === "burnOnHit") addStatus(tgt, { kind: "burn", magnitude: ab.params?.dps ?? 7, durationTicks: ab.params?.dur ?? 30 }, att.id);
+    else if (ab.effect === "bleedOnHit") addStatus(tgt, { kind: "bleed", magnitude: ab.params?.dps ?? 7, durationTicks: ab.params?.dur ?? 30 }, att.id);
+    else if (ab.effect === "freezeOnHit") addStatus(tgt, { kind: "freeze", magnitude: 1, durationTicks: ab.params?.dur ?? 12 }, att.id);
     else if (ab.effect === "confuse") addStatus(tgt, { kind: "confuse", magnitude: 1, durationTicks: 15 }, att.id);
-    else if (ab.effect === "cleave") cleave(ctx, att, tgt, dmg * 0.5);
-    else if (ab.effect === "splash") splash(ctx, att, tgt, dmg * 0.5);
+    else if (ab.effect === "cleave") cleave(ctx, att, tgt, dmg * 0.5, bigAoe ? 2.4 : 1.6);
+    else if (ab.effect === "splash") splash(ctx, att, tgt, dmg * (bigAoe ? 0.6 : 0.5), bigAoe ? 2.6 : 1.6);
   }
   // thorns on target
   const thorns = tgt.abilities.find((a) => a.effect === "thorns");
@@ -488,26 +508,39 @@ function mitigate(dmg: number, type: AffinityType, att: SimEntity, tgt: SimEntit
   return dmg * mult;
 }
 
-function cleave(ctx: Ctx, att: SimEntity, primary: SimEntity, dmg: number) {
+function cleave(ctx: Ctx, att: SimEntity, primary: SimEntity, dmg: number, radius = 1.6) {
   const pool = att.side === "dungeon" ? ctx.invaders : ctx.dungeon;
   for (const o of pool) {
     if (o.id === primary.id || o.state === "dead") continue;
-    if (dist(att, o) <= 1.6) applyDamageRaw(ctx, o, Math.round(dmg), att.primaryDamageType, att.id);
+    if (dist(att, o) <= radius) applyDamageRaw(ctx, o, Math.round(dmg), att.primaryDamageType, att.id);
   }
 }
 
-function splash(ctx: Ctx, att: SimEntity, center: SimEntity, dmg: number) {
+function splash(ctx: Ctx, att: SimEntity, center: SimEntity, dmg: number, radius = 1.6) {
   const pool = att.side === "dungeon" ? ctx.invaders : ctx.dungeon;
   for (const o of pool) {
     if (o.id === center.id || o.state === "dead") continue;
-    if (dist(center, o) <= 1.6) applyDamageRaw(ctx, o, Math.round(dmg), att.primaryDamageType, att.id);
+    if (dist(center, o) <= radius) applyDamageRaw(ctx, o, Math.round(dmg), att.primaryDamageType, att.id);
   }
+}
+
+/** Heal-at-half: the first time HP drops below 50%, heal a chunk (once). */
+function checkHealAtHalf(ctx: Ctx, e: SimEntity) {
+  if (e.healedAtHalf || e.state === "dead") return;
+  if (e.hp <= 0 || e.hp >= e.maxHp * 0.5) return;
+  const ab = e.abilities.find((a) => a.effect === "healAtHalf");
+  if (!ab) return;
+  e.healedAtHalf = true;
+  const amt = Math.round(e.maxHp * (ab.params?.pct ?? 0.3));
+  e.hp = Math.min(e.maxHp, e.hp + amt);
+  ctx.events.push({ tick: ctx.tick, type: "heal", sourceId: e.id, targetId: e.id, amount: amt });
 }
 
 function applyDamageResolved(ctx: Ctx, att: SimEntity, tgt: SimEntity, dmg: number, crit: boolean) {
   absorb(tgt, dmg);
   ctx.events.push({ tick: ctx.tick, type: crit ? "crit" : "hit", sourceId: att.id, targetId: tgt.id, amount: dmg, x: tgt.x, y: tgt.y });
   if (tgt.id === "core") ctx.events.push({ tick: ctx.tick, type: "coreHit", sourceId: att.id, amount: dmg });
+  checkHealAtHalf(ctx, tgt);
   if (tgt.hp <= 0 && tgt.state !== "dead") killEntity(ctx, tgt, att);
 }
 
@@ -520,6 +553,7 @@ function applyDamageRaw(ctx: Ctx, tgt: SimEntity, dmg: number, type: AffinityTyp
   absorb(tgt, Math.max(1, Math.round(d)));
   ctx.events.push({ tick: ctx.tick, type: "hit", sourceId, targetId: tgt.id, amount: Math.round(d), x: tgt.x, y: tgt.y });
   if (tgt.id === "core") ctx.events.push({ tick: ctx.tick, type: "coreHit", sourceId, amount: Math.round(d) });
+  checkHealAtHalf(ctx, tgt);
   if (tgt.hp <= 0 && (tgt.state as string) !== "dead") killEntity(ctx, tgt, undefined);
 }
 
@@ -536,6 +570,19 @@ function killEntity(ctx: Ctx, e: SimEntity, killer?: SimEntity) {
   e.state = "dead";
   e.hp = 0;
   ctx.events.push({ tick: ctx.tick, type: "death", sourceId: killer?.id, targetId: e.id, x: e.x, y: e.y, data: { side: e.side } });
+
+  // explode-on-death: AoE damage to enemies around the corpse
+  const boom = e.abilities.find((a) => a.effect === "explodeOnDeath");
+  if (boom) {
+    const pool = e.side === "dungeon" ? ctx.invaders : ctx.dungeon;
+    const radius = boom.radius ?? 2;
+    const dmg = Math.round(e.maxHp * (boom.params?.pct ?? 0.4));
+    ctx.events.push({ tick: ctx.tick, type: "trapTrigger", x: e.x, y: e.y, data: { explode: true } });
+    for (const o of pool) {
+      if (o.state === "dead") continue;
+      if (dist(e, o) <= radius) applyDamageRaw(ctx, o, dmg, "fire", e.id);
+    }
+  }
   if (e.side === "invader" && e.defId !== "summon") {
     // reward + drops (defeated adventurer)
     const cls = CLASS_BY_ID[e.defId];
@@ -607,6 +654,7 @@ function applyTrapDamage(ctx: Ctx, tgt: SimEntity, dmg: number, type: AffinityTy
   }
   absorb(tgt, Math.max(1, Math.round(d)));
   ctx.events.push({ tick: ctx.tick, type: "hit", sourceId, targetId: tgt.id, amount: Math.round(d), x: tgt.x, y: tgt.y, data: { trap: true } });
+  checkHealAtHalf(ctx, tgt);
   if (tgt.hp <= 0 && (tgt.state as string) !== "dead") { killEntity(ctx, tgt, undefined); }
 }
 

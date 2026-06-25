@@ -9,7 +9,22 @@ import { resolveStats } from "./power";
 import { UNIT_BY_ID, UNIT_DMG } from "./content/units";
 import { CLASS_BY_ID } from "./content/enemies";
 import { RESEARCH_BY_ID } from "./content/research";
+import { CONFIG } from "./config";
 import { key } from "./maputil";
+
+const FAMILY_BONUS_PCT = 0.04; // per same-family neighbor (within NEARBY_RADIUS), capped
+
+/** Apply passive ability effects that modify resolved stats at field time. */
+function applyAbilityPassives(stats: ResolvedStats, abilities: Ability[]): { stats: ResolvedStats; invisible: boolean } {
+  const out = { ...stats };
+  let invisible = false;
+  for (const ab of abilities) {
+    if (ab.effect === "longRange") { out.range += ab.params?.range ?? 2; out.aggroRadius += ab.params?.range ?? 2; }
+    else if (ab.effect === "dash") { out.moveSpeed += ab.params?.speed ?? 0.4; }
+    else if (ab.effect === "invis") { out.stealth += ab.params?.stealth ?? 0.35; invisible = true; }
+  }
+  return { stats: out, invisible };
+}
 
 export interface ResearchMods {
   family: Record<string, Partial<Record<keyof StatBlock, number>>>; // multiplicative pct by family
@@ -110,6 +125,21 @@ export function gearItemsFor(run: RunState, instanceIds: (string | undefined)[])
   return out;
 }
 
+/** Count same-family placed units within NEARBY_RADIUS of a unit (the pack/family bonus). */
+function sameFamilyNeighbors(run: RunState, pu: RunState["units"][number]): number {
+  const def = UNIT_BY_ID[pu.defId];
+  if (!def) return 0;
+  const r = CONFIG.NEARBY_RADIUS;
+  let count = 0;
+  for (const o of run.units) {
+    if (o.id === pu.id) continue;
+    const od = UNIT_BY_ID[o.defId];
+    if (!od || od.family !== def.family) continue;
+    if (Math.max(Math.abs(o.x - pu.x), Math.abs(o.y - pu.y)) <= r) count++;
+  }
+  return Math.min(CONFIG.MAX_NEARBY_UNITS, count);
+}
+
 /** Build dungeon-side entities from a run's placed units. */
 export function buildDungeonEntities(run: RunState, mods: ResearchMods): SimEntity[] {
   const out: SimEntity[] = [];
@@ -120,14 +150,24 @@ export function buildDungeonEntities(run: RunState, mods: ResearchMods): SimEnti
     stats = applyResearchToStats(stats, def.family, def.role, mods);
     const gear = gearItemsFor(run, [pu.gear.weapon, pu.gear.armor, ...(pu.gear.accessory ?? [])]);
     stats = applyGear(stats, gear, def.affinities);
+    // Family adjacency bonus: nearby same-family allies grant a minor stat boost.
+    const fam = sameFamilyNeighbors(run, pu);
+    if (fam > 0) {
+      const b = 1 + fam * FAMILY_BONUS_PCT;
+      stats.hp *= b; stats.phys *= b; stats.mag *= b; stats.rng *= b; stats.def *= b;
+    }
+    const passives = applyAbilityPassives(stats, def.abilities ?? []);
+    stats = passives.stats;
     const dmgKind = UNIT_DMG[pu.defId] ?? "melee";
     const pdt: AffinityType = dmgKind === "ranged" ? "ranged" : dmgKind === "arcane" ? "arcane" : "melee";
-    out.push(makeEntity({
+    const ent = makeEntity({
       id: pu.id, side: "dungeon", defId: pu.defId, name: def.name, family: def.family,
       tier: def.tier, stats, affinities: def.affinities, abilities: def.abilities ?? [],
-      x: pu.x, y: pu.y, isTurret: pu.isTurret || def.role === "tank" && def.turretCapable && pu.isTurret,
+      x: pu.x, y: pu.y, isTurret: pu.isTurret || (def.role === "tank" && def.turretCapable && pu.isTurret),
       primaryDamageType: pdt,
-    }));
+    });
+    ent.invisible = passives.invisible;
+    out.push(ent);
   }
   return out;
 }
@@ -147,15 +187,18 @@ export function buildInvaderEntities(wave: WaveDef, entrance: { x: number; y: nu
       stats.def = Math.round(stats.def * inv.statMult);
     }
     const pdt = primaryDamageType(stats.phys, stats.mag, stats.rng, cls.archetype === "mage" ? "arcane" : cls.archetype === "archer" ? "ranged" : "melee");
+    const passives = applyAbilityPassives(stats, cls.abilities ?? []);
     // jitter spawn around entrance deterministically
     const angle = (i * 2.39996); // golden angle
     const r = 0.2 + (i % 5) * 0.12;
-    out.push(makeEntity({
+    const ent = makeEntity({
       id: inv.id, side: "invader", defId: inv.classId, name: cls.name, archetype: cls.archetype,
-      tier: inv.tier, stats, affinities: cls.affinities, abilities: cls.abilities ?? [],
+      tier: inv.tier, stats: passives.stats, affinities: cls.affinities, abilities: cls.abilities ?? [],
       x: entrance.x + Math.cos(angle) * r, y: entrance.y + Math.sin(angle) * r,
       isUnique: inv.isUnique, revealRadius: cls.revealRadius ?? 0, primaryDamageType: pdt,
-    }));
+    });
+    ent.invisible = passives.invisible;
+    out.push(ent);
   });
   return out;
 }

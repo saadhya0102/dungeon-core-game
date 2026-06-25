@@ -4,7 +4,7 @@
 // Detail scales with tier; uniques get an aura, crown, and banner.
 // ============================================================================
 import { Container, Graphics } from "pixi.js";
-import { TIER_COLORS } from "../../sim/types";
+import { TIER_COLORS, FLAG_BERSERK, FLAG_FROZEN, FLAG_INVIS } from "../../sim/types";
 
 export type WeaponKind = "melee" | "ranged" | "arcane";
 
@@ -36,6 +36,9 @@ export class AnimSprite {
   private dieT = 0;
   private dieDir = Math.random() < 0.5 ? -1 : 1;
   private idleSpeed = 2.2 + Math.random() * 0.6;
+  private berserkRing?: Graphics;
+  private frostOverlay?: Graphics;
+  private flags = 0;
   dead = false;
   weaponKind: WeaponKind;
 
@@ -44,7 +47,23 @@ export class AnimSprite {
     this.root.addChild(this.inner);
     if (opts.kind === "core") this.buildCore(opts);
     else this.buildCreature(opts);
+    this.makeStatusFx();
   }
+
+  private makeStatusFx() {
+    const ring = new Graphics();
+    ring.circle(0, -2, 16).stroke({ width: 2.5, color: 0xff3030 });
+    ring.visible = false;
+    this.root.addChild(ring);
+    this.berserkRing = ring;
+    const frost = new Graphics();
+    frost.circle(0, -2, 14).fill({ color: 0x9fd8ff, alpha: 0.5 });
+    frost.visible = false;
+    this.root.addChild(frost);
+    this.frostOverlay = frost;
+  }
+
+  setFlags(fl: number) { this.flags = fl; }
 
   private buildCore(opts: SpriteOpts) {
     const g = new Graphics();
@@ -188,6 +207,11 @@ export class AnimSprite {
       this.aura.scale.set(1 + Math.sin(t * 2) * 0.08);
       this.aura.alpha = 0.22 + Math.sin(t * 2) * 0.08;
     }
+
+    // status visuals
+    if (this.berserkRing) this.berserkRing.visible = (this.flags & FLAG_BERSERK) !== 0;
+    if (this.frostOverlay) this.frostOverlay.visible = (this.flags & FLAG_FROZEN) !== 0;
+    this.root.alpha = (this.flags & FLAG_INVIS) ? 0.45 : 1;
   }
 }
 

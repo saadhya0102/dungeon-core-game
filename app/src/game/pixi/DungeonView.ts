@@ -349,6 +349,7 @@ export class DungeonView {
       if (prev && Math.abs(x - prev.x) > 0.002) entry.anim.setFacing(x - prev.x);
       this.lastPos.set(e.id, { x, y });
       entry.anim.root.position.set(x * TILE, y * TILE);
+      entry.anim.setFlags(e.fl ?? 0);
       this.updateHpBar(entry.hpbar, e.hp / Math.max(1, e.maxHp));
     }
     // entities that vanished from frames: trigger their death animation

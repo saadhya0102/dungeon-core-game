@@ -11,7 +11,7 @@ import { tierBudget } from "../config";
 
 export type GenRole =
   | "swarm" | "bruiser" | "tank" | "ranged" | "caster"
-  | "rogue" | "spammer" | "colossus" | "summoner";
+  | "rogue" | "spammer" | "colossus" | "summoner" | "skirmisher";
 export type DmgKind = "melee" | "ranged" | "arcane";
 
 interface Profile {
@@ -19,16 +19,21 @@ interface Profile {
   sec: Partial<StatBlock>;                // secondary overrides (absolute values)
 }
 
+// Rebalanced so same-tier units of different roles have comparable combat value:
+// every role keeps a survivability floor, and offense roles trade raw HP for
+// damage rather than being one-shot glass cannons. Archers out-range mages;
+// mages get AoE via abilities (content). Sight (aggroRadius) is set >= range.
 const PROFILES: Record<GenRole, Profile> = {
-  swarm: { hp: 0.42, def: 0.12, main: 0.46, sec: { atkSpeed: 1.15, moveSpeed: 1.1, threat: 1.0 } },
-  bruiser: { hp: 0.46, def: 0.20, main: 0.34, sec: { atkSpeed: 1.05, threat: 1.3, block: 0.06 } },
-  tank: { hp: 0.55, def: 0.30, main: 0.15, sec: { block: 0.18, threat: 2.4, moveSpeed: 0.85, mres: 8 } },
-  ranged: { hp: 0.26, def: 0.10, main: 0.64, sec: { range: 4, acc: 1.15, atkSpeed: 1.1, moveSpeed: 1.05 } },
-  caster: { hp: 0.22, def: 0.08, main: 0.70, sec: { range: 4, magPen: 6, mres: 6 } },
-  rogue: { hp: 0.30, def: 0.10, main: 0.60, sec: { dodge: 0.3, crit: 0.3, stealth: 0.4, moveSpeed: 1.4, acc: 1.1, detection: 40 } },
-  spammer: { hp: 0.30, def: 0.10, main: 0.60, sec: { atkSpeed: 1.6, moveSpeed: 1.3, acc: 1.2, range: 4 } },
-  colossus: { hp: 0.50, def: 0.18, main: 0.32, sec: { threat: 2.0, block: 0.1, moveSpeed: 0.85 } },
-  summoner: { hp: 0.30, def: 0.12, main: 0.58, sec: { range: 5, threat: 1.4 } },
+  swarm: { hp: 0.40, def: 0.12, main: 0.48, sec: { atkSpeed: 1.15, moveSpeed: 1.1, threat: 1.0 } },
+  bruiser: { hp: 0.45, def: 0.18, main: 0.37, sec: { atkSpeed: 1.05, threat: 1.3, block: 0.06 } },
+  tank: { hp: 0.55, def: 0.28, main: 0.17, sec: { block: 0.18, threat: 2.4, moveSpeed: 0.9, mres: 8 } },
+  ranged: { hp: 0.34, def: 0.10, main: 0.56, sec: { range: 5, acc: 1.15, atkSpeed: 1.1, moveSpeed: 1.05 } },
+  caster: { hp: 0.32, def: 0.10, main: 0.58, sec: { range: 4, magPen: 6, mres: 6 } },
+  rogue: { hp: 0.36, def: 0.10, main: 0.54, sec: { dodge: 0.25, crit: 0.25, stealth: 0.35, moveSpeed: 1.4, acc: 1.1, detection: 30 } },
+  spammer: { hp: 0.34, def: 0.10, main: 0.56, sec: { atkSpeed: 1.55, moveSpeed: 1.25, acc: 1.2, range: 4 } },
+  colossus: { hp: 0.50, def: 0.18, main: 0.32, sec: { threat: 2.0, block: 0.1, moveSpeed: 0.9 } },
+  summoner: { hp: 0.34, def: 0.12, main: 0.54, sec: { range: 5, threat: 1.4 } },
+  skirmisher: { hp: 0.40, def: 0.12, main: 0.48, sec: { moveSpeed: 1.45, crit: 0.15, atkSpeed: 1.15 } },
 };
 
 const W = CONFIG.POWER_WEIGHTS;
@@ -112,7 +117,8 @@ export function buildStats(tier: Tier, role: GenRole, dmg: DmgKind): StatBlock {
     block: round2(sec.block),
     lifesteal: round2(sec.lifesteal),
     regen: 0,
-    aggroRadius: DEFAULT_SECONDARY.aggroRadius,
+    // Sight >= attack range so a unit can always see what it can hit.
+    aggroRadius: Math.max(6, Math.round(dmg === "melee" ? 4 : sec.range + 2)),
     threat: round2(profile.sec.threat ?? 1),
   };
 

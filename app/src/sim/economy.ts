@@ -17,13 +17,13 @@ export function dpWaveClear(wave: number): number {
 }
 
 const ROLE_COST_MULT: Record<string, number> = {
-  swarm: 0.85, melee: 0.95, ranged: 1.0, caster: 1.05, bruiser: 1.0,
-  tank: 1.0, summoner: 1.15, control: 1.15, hybrid: 1.1, colossus: 1.1,
-  capstone: 1.25, utility: 1.1,
+  swarm: 0.9, melee: 0.97, ranged: 1.0, caster: 1.03, bruiser: 1.0,
+  tank: 1.0, summoner: 1.08, control: 1.08, hybrid: 1.05, colossus: 1.08,
+  capstone: 1.12, utility: 1.05,
 };
 
 const FAMILY_COST_MULT: Record<string, number> = {
-  goblinoid: 0.9, undead: 0.95, beast: 1.0, demon: 1.15, construct: 1.05, aberration: 1.1,
+  goblinoid: 0.94, undead: 0.97, beast: 1.0, demon: 1.05, construct: 1.0, aberration: 1.02,
 };
 
 export function unitCost(def: UnitDef): number {

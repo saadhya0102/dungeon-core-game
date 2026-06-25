@@ -85,7 +85,10 @@ export type AbilityEffectKind =
   | "cleave" | "splash" | "slowOnHit" | "poisonDot" | "auraBuff" | "fear"
   | "summon" | "shieldOnWaveStart" | "executeLowHp" | "firstStrike"
   | "healAlly" | "petSummon" | "blink" | "partyBuff" | "confuse" | "thorns"
-  | "reviveSelf";
+  | "reviveSelf"
+  // differentiation abilities
+  | "burnOnHit" | "freezeOnHit" | "bleedOnHit" | "healAtHalf" | "explodeOnDeath"
+  | "berserk" | "dash" | "invis" | "bigAoe" | "longRange";
 
 export interface Ability {
   id: string;
@@ -174,8 +177,13 @@ export interface TrapDef {
 // Status effects (docs/10 §4.3)
 // ----------------------------------------------------------------------------
 export type StatusKind =
-  | "poison" | "burn" | "bleed" | "slow" | "root" | "stun"
+  | "poison" | "burn" | "bleed" | "slow" | "root" | "stun" | "freeze"
   | "debuffStat" | "buffStat" | "shield" | "fear" | "silence" | "confuse";
+
+// Frame status flag bits (for replay visuals).
+export const FLAG_FROZEN = 1;
+export const FLAG_BERSERK = 2;
+export const FLAG_INVIS = 4;
 
 export interface StatusSpec {
   kind: StatusKind;
@@ -408,6 +416,11 @@ export interface SimEntity {
   statuses: StatusEffect[];
   revealRadius: number;
   threatValue: number;
+  // ability runtime state
+  firstAttackDone?: boolean;
+  healedAtHalf?: boolean;
+  berserk?: boolean;
+  invisible?: boolean;
 }
 
 export type SimEventType =
@@ -438,6 +451,7 @@ export interface FrameEnt {
   y: number;
   hp: number;
   maxHp: number;
+  fl?: number; // status flag bits (FLAG_*)
 }
 
 export interface Frame {

@@ -32,10 +32,22 @@ function archAffinities(a: Archetype) {
 
 function classAbilities(a: Archetype, tier: Tier): Ability[] {
   const out: Ability[] = [];
-  if (a === "warrior" && tier >= 5) out.push(ab("partyBuff", "passive", { phys: 0.08 }, 4));
-  if (a === "archer" && tier >= 5) out.push(ab("firstStrike", "passive"));
-  if (a === "mage" && tier >= 3) out.push(ab("splash", "onHit"));
-  if (a === "rogue" && tier >= 4) out.push(ab("firstStrike", "passive"));
+  if (a === "warrior") {
+    if (tier >= 5) out.push(ab("partyBuff", "passive", { phys: 0.08 }, 4));
+    if (tier >= 6) out.push(ab("berserk", "passive"));
+  }
+  if (a === "archer") {
+    if (tier >= 5) out.push(ab("firstStrike", "passive"));
+    if (tier >= 6) out.push(ab("longRange", "passive", { range: 2 }));
+  }
+  if (a === "mage") {
+    if (tier >= 3) out.push(ab("splash", "onHit"));
+    if (tier >= 6) out.push(ab("bigAoe", "passive"));
+  }
+  if (a === "rogue") {
+    if (tier >= 4) out.push(ab("firstStrike", "passive"));
+    if (tier >= 7) out.push(ab("invis", "passive", { stealth: 0.4 }));
+  }
   return out;
 }
 
@@ -62,8 +74,8 @@ for (const a of Object.keys(MAINLINE) as Archetype[]) {
 const branches: ClassDef[] = [
   {
     id: "adv_w_berserker", name: "Berserker", archetype: "warrior", tier: 4, branch: true,
-    stats: buildStats(4, "bruiser", "melee"), affinities: aff("A"),
-    abilities: [ab("executeLowHp", "onHit")],
+    stats: buildStats(4, "skirmisher", "melee"), affinities: aff("A"),
+    abilities: [ab("executeLowHp", "onHit"), ab("berserk", "passive"), ab("dash")],
   },
   {
     id: "adv_w_guardian", name: "Guardian", archetype: "warrior", tier: 6, branch: true,
@@ -83,7 +95,7 @@ const branches: ClassDef[] = [
   {
     id: "adv_m_elementalist", name: "Elementalist", archetype: "mage", tier: 6, branch: true,
     stats: buildStats(6, "caster", "arcane"), affinities: aff(undefined, undefined, "A", { fire: "A", frost: "A" }),
-    abilities: [ab("splash", "onHit")],
+    abilities: [ab("splash", "onHit"), ab("bigAoe", "passive"), ab("burnOnHit", "onHit", { dps: 18, dur: 30 }), ab("freezeOnHit", "onHit", { dur: 10 })],
   },
   {
     id: "adv_r_scout", name: "Scout", archetype: "rogue", tier: 4, branch: true,
