@@ -1,0 +1,66 @@
+overall idea for the game:
+
+all players are "dungeon cores," they control a dungeon. 
+The macro gameplay loop is that they run a "wave," where
+invaders try to destroy the core. Defeating them gets you 
+dungeon points, which can be invested to improve the dungeon.
+
+Game is 2d top down. intruders are adventurers(mostly human in a fantasy world) of varying "tiers" (bronze silver gold + like 7 more)
+
+The stuff you can buy include the following:
+
+expansions: The map is a grid. You can buy a pickaxe icon 
+that lets you click and break the surrounding regions. You can access them regardless of distance, but the main issue is that there must be a path from the enterance protal to the core.
+You can then place stuff in this newly opened spot. Baseline will be 5x5 region with the core in the middle.
+
+units: fantasy setting so you can buy the evil fantasy races, like goblins skeeltosn etc alsowith the same tiers(1 unit is equivalent to an adventurer of equal tier approximately kinda)
+you can make units stronger in a few differnet ways: 
+
+the total "capacity" of units you have is some number, adn this goes up when you spend some poitns to upgrade the core level.
+different tiers of units take up diff number of spaces, but in theory they become stronger faster than their space limit goes up.
+maybe like do like 1 2 3 5 10 20 30 50 80 200 ... for space to tier.
+now you can place 1 unit on a specific tile.
+There should also be a research tree, that you unlock the ability to buy parts of as your core levels up(with the same points). This will be a unit research tree, so it will unlock units, or unlock upgrades for unit subsets.
+subsets would be like (smth that represents goblins gremlins shamans orcs ogres trolls) (skeletons liches etc) so on and so forth.
+Upgrade would be like all goblinoid units gain x in some stat.
+tier of a unit is defined by smth, make this easy to change in the future, but figure out some decent hueristic for overall power, you can start with just stat total right now(just for the unit).
+You will also collect armor weapons etc from defeating opponents sometimes.
+Now units as a singular can equip anything for now, but they will have certain parts of them that will impact effectiveness called affinities for their equippable tools.
+
+so for stats, units should have health defense physical attack magic attack ranged attack. They should have also have affinities, so like liches have high magic damage affinity, low ranged affinity, abyssmal physical affinity, etc. etc. that dictates what kind of weapons are most optimal.
+tools and armor dont impact tier rating, but noone can wear smth more than 1 tier above them.
+
+also come up with a lot of affinity spiecific stats, like archers have speed and accuracy(anti-rogue), etc etc come up with the rest.
+you can also buy and place traps of various kinds. each trap has like one of a few types, and a rating that determines how hidden it is
+
+
+for enemies, you will have differnt types, warriors archers mages rogues
+rogues have some radius and some skill, and all traps become apparent within that radius, and your units have leq .9 probability of hitting them, goes down with rogue skill. They also have classes, they evolve with each tier, so higher tier enemies have more specialized clalses.
+
+countered by spammers that shoot a lot, high speed ranged units.
+
+Also traps can do various things, so smth ould be like a trap that is very hidden, but if triggered it removes rogue dodge ability.
+
+rest are self explanatory, probably just have like 1 straightforward path for each archetype. also, make a few more classes adn stuff.
+
+THere will be special named opponents that have the unique tag that are stronger or smth, generally leaders of the parties and stuff.
+
+Solo adventuerers, parties of a few, horders, crusades are the types of things, more weakers + stronger adventurers in the higher ones.
+Make or find sprites for everything.
+
+THere is a enterance gate that everyone enters from, no traps allowed super close, you can mov this around, but there has to be a path to the dungeon core, with no traps on it.
+The pathfinding of the adventurers just explores normally, and they all share info, and if they find opponents they fight if they are close, then if they find dungeon core try to attack it.
+if dungeon core helath goes to 0 you lose, data and stuff is saved, of the dozens of achievements it stores which ones you got, as well as your final dungeon state. you can pick any dungeon state that you have, and then the h2h matches are like you against an ai running the opponent, you can choose to buy adventurers to attack both of you in the next wave and see who survives longer(with a baseline that increases over time) so that gaems dont usually go more than 10 rounds.
+h2h isnt real time, you vs the bot and their last saved data.
+
+account system setup, save states when they exist that is linked to the auth, they should be able to hover over to see unit stats and stuff, excessively large dungeons arent permitted by size caps based on core level, dungeon monsters ai is just wait at spawn until they see an opponent then fight and stuff.
+
+
+Make reasonable assumptions as to the overarching like setup, make your own set of units and research tree that does stuff, scaling, balancing, trap types, maybe make turrets too that can take up some unit space for just immobile tankier ranged units that can run away, click and drag to move units
+if the storage or hosting stuff doesnt work just do the rest and scaffold that part
+unexplored regions should just be like stone or rock or dark smth until you pickaxe them open. hover over unit to add equipment, see stats, affinities, etc. buying units does the same thing, maybe also add a buy armor thing at like core level 3 or smth
+
+figure out optimal game design for this stuff
+
+
+

@@ -1,0 +1,5 @@
+/* Base reset; full theme lives in ui/ui.css */
+:root {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
