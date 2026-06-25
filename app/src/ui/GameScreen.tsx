@@ -9,6 +9,7 @@ import { Panels } from "./Panels";
 import { WaveBar } from "./WaveBar";
 import { ResultOverlay } from "./ResultOverlay";
 import { TutorialOverlay } from "./TutorialOverlay";
+import { GuidedTutorial } from "./GuidedTutorial";
 
 export function GameScreen() {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -87,6 +88,7 @@ export function GameScreen() {
         {toast && <div className="toast">{toast}</div>}
         {phase === "result" && <ResultOverlay />}
         <TutorialOverlay />
+        <GuidedTutorial />
       </div>
       <WaveBar />
     </div>

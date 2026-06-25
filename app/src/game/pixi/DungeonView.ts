@@ -62,7 +62,7 @@ export class DungeonView {
   private spriteById = new Map<string, { anim: AnimSprite; hpbar: Graphics }>();
   private buildSprites: AnimSprite[] = [];
   private lastPos = new Map<string, { x: number; y: number }>();
-  private projectiles: { g: Graphics; sx: number; sy: number; tx: number; ty: number; life: number; max: number }[] = [];
+  private projectiles: { g: Graphics; sx: number; sy: number; tx: number; ty: number; life: number; max: number; kind: WeaponKind }[] = [];
   private getSpeed: () => number = () => 1;
   private onReplayEnd: () => void = () => {};
   private cursor = 0;
@@ -252,6 +252,7 @@ export class DungeonView {
         unique: false,
         weapon: (UNIT_DMG[u.defId] ?? "melee") as WeaponKind,
         side: "dungeon",
+        family: def.family,
       });
       anim.root.position.set(u.x * TILE, u.y * TILE);
       if (u.id === this.selectionId) {
@@ -377,6 +378,7 @@ export class DungeonView {
         unique: meta.isUnique,
         weapon: weaponForArchetype(meta.archetype),
         side: "invader",
+        archetype: meta.archetype,
       });
     }
     const color = meta?.family ? FAMILY_COLORS[meta.family] : 0x66cc88;
@@ -387,6 +389,7 @@ export class DungeonView {
       tier: meta?.tier ?? 1,
       weapon,
       side: "dungeon",
+      family: meta?.family,
     });
   }
 
@@ -398,50 +401,97 @@ export class DungeonView {
     bar.rect(-w / 2, -22, w * Math.max(0, frac), 3).fill(frac > 0.5 ? 0x66dd66 : frac > 0.25 ? 0xddcc44 : 0xdd4444);
   }
 
-  private fxItems: { g: Graphics | Text; life: number; max: number; vy: number }[] = [];
+  private fxItems: { g: Graphics | Text; life: number; max: number; vx: number; vy: number; sr: number }[] = [];
 
-  private handleFxEvent(ev: { type: string; x?: number; y?: number; amount?: number; sourceId?: string; targetId?: string }) {
-    if ((ev.type === "hit" || ev.type === "crit") && ev.x !== undefined && ev.y !== undefined) {
-      const t = new Text({ text: String(ev.amount ?? 0), style: { fontSize: ev.type === "crit" ? 15 : 11, fill: ev.type === "crit" ? 0xffe066 : 0xffffff, fontWeight: "bold" } });
-      t.anchor.set(0.5);
-      t.position.set(ev.x * TILE + (Math.random() * 10 - 5), ev.y * TILE - 14);
-      this.fxLayer.addChild(t);
-      this.fxItems.push({ g: t, life: 40, max: 40, vy: -0.6 });
-      // trigger the attacker's attack animation + projectile for ranged/casters
+  private addFx(g: Graphics | Text, life: number, vx: number, vy: number, sr = 0) {
+    this.fxLayer.addChild(g);
+    this.fxItems.push({ g, life, max: life, vx, vy, sr });
+  }
+
+  /** Expanding ring burst. */
+  private burst(x: number, y: number, color: number, r: number, life: number) {
+    const g = new Graphics();
+    g.circle(0, 0, r).stroke({ width: 2.5, color });
+    g.position.set(x, y);
+    this.addFx(g, life, 0, 0, 0.14);
+  }
+
+  /** A spray of small particles. */
+  private spark(x: number, y: number, color: number, n: number, spread: number) {
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.random();
+      const g = new Graphics();
+      g.circle(0, 0, 1.7).fill(color);
+      g.position.set(x, y);
+      this.addFx(g, 14, Math.cos(a) * spread, Math.sin(a) * spread, 0);
+    }
+  }
+
+  private handleFxEvent(ev: { type: string; x?: number; y?: number; amount?: number; sourceId?: string; targetId?: string; data?: Record<string, unknown> }) {
+    // resolve a screen position from the event or from a tracked entity
+    let px: number | undefined;
+    let py: number | undefined;
+    if (ev.x !== undefined && ev.y !== undefined) { px = ev.x * TILE; py = ev.y * TILE; }
+    else {
+      const p = (ev.targetId && this.lastPos.get(ev.targetId)) || (ev.sourceId && this.lastPos.get(ev.sourceId));
+      if (p) { px = p.x * TILE; py = p.y * TILE; }
+    }
+
+    if (ev.type === "hit" || ev.type === "crit") {
+      if (px === undefined || py === undefined) return;
+      const crit = ev.type === "crit";
+      const t = new Text({ text: String(ev.amount ?? 0), style: { fontSize: crit ? 16 : 11, fill: crit ? 0xffe066 : 0xffffff, fontWeight: "bold", stroke: { color: 0x000000, width: 3 } } });
+      t.anchor.set(0.5); t.position.set(px + (Math.random() * 10 - 5), py - 14);
+      this.addFx(t, crit ? 50 : 40, 0, -0.6, 0);
+      this.spark(px, py, crit ? 0xffe066 : 0xffffff, crit ? 6 : 3, crit ? 1.7 : 1.1);
       if (ev.sourceId) {
         const entry = this.spriteById.get(ev.sourceId);
         const ap = this.lastPos.get(ev.sourceId);
-        if (entry && ap) {
+        if (entry && ap && ev.x !== undefined && ev.y !== undefined) {
           entry.anim.attack(ev.x - ap.x, ev.y - ap.y);
           if (entry.anim.weaponKind !== "melee") this.spawnProjectile(ap.x, ap.y, ev.x, ev.y, entry.anim.weaponKind);
         }
       }
-    } else if (ev.type === "trapTrigger" && ev.x !== undefined && ev.y !== undefined) {
-      const g = new Graphics();
-      g.circle(ev.x * TILE, ev.y * TILE, 6).fill({ color: 0xffaa33, alpha: 0.85 });
-      this.fxLayer.addChild(g);
-      this.fxItems.push({ g, life: 18, max: 18, vy: 0 });
-    } else if (ev.type === "death" && ev.x !== undefined && ev.y !== undefined) {
-      const g = new Graphics();
-      g.circle(ev.x * TILE, ev.y * TILE, 10).stroke({ width: 2, color: 0xff5555 });
-      this.fxLayer.addChild(g);
-      this.fxItems.push({ g, life: 16, max: 16, vy: 0 });
+    } else if (ev.type === "trapTrigger" && px !== undefined && py !== undefined) {
+      const explode = !!ev.data?.explode;
+      this.burst(px, py, explode ? 0xff7733 : 0xffaa33, explode ? 8 : 5, explode ? 26 : 18);
+      this.spark(px, py, 0xffcc66, explode ? 10 : 5, explode ? 2.4 : 1.4);
+    } else if (ev.type === "death" && px !== undefined && py !== undefined) {
+      this.burst(px, py, 0xff5555, 8, 18);
+      this.spark(px, py, 0x999999, 5, 1.3);
+    } else if (ev.type === "heal" && px !== undefined && py !== undefined) {
+      const t = new Text({ text: "+", style: { fontSize: 16, fill: 0x66dd88, fontWeight: "bold" } });
+      t.anchor.set(0.5); t.position.set(px, py - 10);
+      this.addFx(t, 36, 0, -0.5, 0);
+    } else if (ev.type === "summon" && px !== undefined && py !== undefined) {
+      this.burst(px, py, 0xb98cff, 5, 16);
+    } else if (ev.type === "reveal" && px !== undefined && py !== undefined) {
+      this.burst(px, py, 0x7fd0ff, 6, 16);
     }
   }
 
   private spawnProjectile(sx: number, sy: number, tx: number, ty: number, kind: WeaponKind) {
     const g = new Graphics();
     const color = kind === "arcane" ? 0x9a7cff : 0xffe08a;
-    g.circle(0, 0, kind === "arcane" ? 3 : 2).fill(color);
+    if (kind === "arcane") {
+      g.circle(0, 0, 4.5).fill({ color, alpha: 0.3 });
+      g.circle(0, 0, 2.6).fill(color);
+    } else {
+      // arrow pointing toward the target
+      g.poly([7, 0, -4, 2.5, -4, -2.5]).fill(color).stroke({ width: 0.5, color: 0x6a4a2a });
+      g.rotation = Math.atan2(ty - sy, tx - sx);
+    }
     g.position.set(sx * TILE, sy * TILE - 6);
     this.fxLayer.addChild(g);
-    this.projectiles.push({ g, sx: sx * TILE, sy: sy * TILE - 6, tx: tx * TILE, ty: ty * TILE - 6, life: 0, max: 8 });
+    this.projectiles.push({ g, sx: sx * TILE, sy: sy * TILE - 6, tx: tx * TILE, ty: ty * TILE - 6, life: 0, max: 8, kind });
   }
 
   private updateFx(step: number) {
     for (const item of this.fxItems) {
       item.life -= step;
+      item.g.x += item.vx * step;
       item.g.y += item.vy * step;
+      if (item.sr) item.g.scale.set(Math.max(0.05, item.g.scale.x + item.sr * step));
       item.g.alpha = Math.max(0, item.life / item.max);
     }
     this.fxItems = this.fxItems.filter((i) => {
@@ -452,9 +502,19 @@ export class DungeonView {
       p.life += step;
       const t = Math.min(1, p.life / p.max);
       p.g.position.set(lerp2(p.sx, p.tx, t), lerp2(p.sy, p.ty, t));
+      if (p.kind === "arcane") {
+        const tr = new Graphics();
+        tr.circle(0, 0, 2).fill({ color: 0x9a7cff, alpha: 0.5 });
+        tr.position.set(p.g.x, p.g.y);
+        this.addFx(tr, 8, 0, 0, -0.06);
+      }
     }
     this.projectiles = this.projectiles.filter((p) => {
-      if (p.life >= p.max) { p.g.destroy(); return false; }
+      if (p.life >= p.max) {
+        this.spark(p.g.x, p.g.y, p.kind === "arcane" ? 0x9a7cff : 0xffe08a, 4, 1.4);
+        p.g.destroy();
+        return false;
+      }
       return true;
     });
   }

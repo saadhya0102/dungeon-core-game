@@ -176,6 +176,8 @@ export function TutorialOverlay() {
 
   if (!run) return null;
   if (phase !== "build" && phase !== "result") return null;
+  // The guided tutorial owns onboarding until it's completed/skipped.
+  try { if (localStorage.getItem("dc_tutorial_done") !== "1") return null; } catch { /* ignore */ }
 
   const active = TIPS.find((t) => !seen.has(t.id) && t.match(run, phase, seen));
   if (!active) return null;
