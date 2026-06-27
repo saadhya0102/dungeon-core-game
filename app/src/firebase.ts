@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, connectAuthEmulator } from "firebase/auth";
-import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import { initializeFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
 
 const firebaseConfig = {
@@ -16,7 +16,9 @@ const firebaseConfig = {
 export const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+// ignoreUndefinedProperties: our run/snapshot objects have many optional fields
+// that are `undefined`; without this, Firestore throws and cloud saves fail.
+export const db = initializeFirestore(app, { ignoreUndefinedProperties: true });
 // Cloud Functions region — change here if you deploy functions to another region.
 export const functions = getFunctions(app, "us-central1");
 
