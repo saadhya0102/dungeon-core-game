@@ -8,7 +8,7 @@ import { UNIT_BY_ID } from "./content/units";
 import { TRAP_BY_ID } from "./content/traps";
 import { RESEARCH_BY_ID, unlockedUnitIds } from "./content/research";
 import { computeResearchMods } from "./combat";
-import { unitCost, turretCost, digCost, gearPrice, salvageValue } from "./economy";
+import { unitCost, turretCost, digCost, gearPrice, salvageValue, clUpgradeCost } from "./economy";
 import { key, isPassable, pathExists, neighbors, validatePaths, manhattan, roomOpen } from "./maputil";
 import { generateGear, rollQuality } from "./content/gear";
 import { makePRNG } from "./rng";
@@ -342,7 +342,7 @@ export function buyResearch(run: RunState, nodeId: string): ActionResult {
 export function upgradeCore(run: RunState): ActionResult {
   if (run.core.level >= 20) return "Core is at maximum level";
   const next = coreLevelRow(run.core.level + 1);
-  if (!spend(run, next.cost)) return "Not enough DP";
+  if (!spend(run, clUpgradeCost(run.core.level))) return "Not enough DP";
   const hpDelta = next.coreHp - run.core.maxHp;
   run.core.level += 1;
   run.core.maxHp = next.coreHp;

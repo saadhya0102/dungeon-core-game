@@ -56,7 +56,7 @@ const TIPS: Tip[] = [
     title: "Spread Out Into Many Rooms",
     body:
       "A unit can only be near 5 other units \u2014 cram in a 6th and it's blocked. " +
-      "This forces you to build multiple rooms. BONUS: units of the SAME FAMILY " +
+      "This forces you to build multiple rooms. BONUS: units of the SAME FACTION " +
       "standing close together get a stat boost, so build themed rooms (a goblin den, " +
       "an undead crypt) for the best results.",
     match: (run) => run.units.length >= 4,
@@ -84,8 +84,8 @@ const TIPS: Tip[] = [
     id: "research",
     title: "Open the Research Lab",
     body:
-      "Research unlocks new monsters and permanent family upgrades for this run. " +
-      "You can't afford everything \u2014 specialize. Family upgrades make a themed " +
+      "Research unlocks new monsters and permanent faction upgrades for this run. " +
+      "You can't afford everything \u2014 specialize. Faction upgrades make a themed " +
       "army (e.g. all goblinoids) punch far above their cost.",
     match: (run) => run.research.owned.length < 4 && run.dp >= 60,
   },

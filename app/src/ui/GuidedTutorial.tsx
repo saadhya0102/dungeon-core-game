@@ -74,7 +74,7 @@ const STEPS: Step[] = [
     title: "Place Your First Monster",
     body:
       "Open Units, click a monster (start with a cheap Goblin), then click an open floor tile " +
-      "to place it. Tip: a unit can be near at most 5 others, and same-FAMILY units near each " +
+      "to place it. Tip: a unit can be near at most 5 others, and same-FACTION units near each " +
       "other gain a stat bonus \u2014 so build themed rooms.",
     actionHint: "Place a unit to continue\u2026",
     action: (run) => run.units.length >= 1,

@@ -82,6 +82,7 @@ export class DungeonView {
       resizeTo: this.parent,
       antialias: true,
       autoDensity: true,
+      sharedTicker: false, // each view drives its own ticker (needed for H2H split-screen)
       resolution: Math.min(2, window.devicePixelRatio || 1),
     });
     if (this.destroyed) { this.app.destroy(true, { children: true }); return; }
@@ -92,6 +93,7 @@ export class DungeonView {
     this.app.stage.hitArea = this.app.screen;
     this.bindEvents();
     this.app.ticker.add(() => this.tick());
+    this.app.ticker.start();
     this.inited = true;
     this.tryCenter();
   }

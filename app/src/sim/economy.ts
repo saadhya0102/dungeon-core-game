@@ -13,7 +13,10 @@ export function dpKill(advPowerScore: number, isUnique: boolean): number {
 }
 
 export function dpWaveClear(wave: number): number {
-  return Math.round(CONFIG.WAVE_CLEAR_BASE * (1 + wave * CONFIG.WAVE_CLEAR_GROWTH));
+  return Math.round(
+    CONFIG.WAVE_CLEAR_BASE * (1 + wave * CONFIG.WAVE_CLEAR_GROWTH)
+    + CONFIG.WAVE_CLEAR_BASE * Math.pow(wave / 10, CONFIG.WAVE_CLEAR_LATE_POW),
+  );
 }
 
 const ROLE_COST_MULT: Record<string, number> = {
@@ -44,7 +47,7 @@ export function digCost(openedTiles: number): number {
 
 export function clUpgradeCost(currentCl: number): number {
   const next = coreLevelRow(currentCl + 1);
-  return next.cost;
+  return Math.round(next.cost * CONFIG.CORE_COST_MULT);
 }
 
 export function researchCost(researchTier: number, weight: number): number {

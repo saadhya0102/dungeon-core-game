@@ -183,17 +183,24 @@ export const useStore = create<StoreState>((set, get) => ({
       return;
     }
 
+    // Clicking anything already on the board selects it (and drops the active
+    // tool), so there's no need for a dedicated Select button.
+    const t = run.map.tiles[`${x},${y}`];
+    const occupied = !!t && (!!t.unitId || !!t.trapId || t.state === "core" || t.state === "entrance");
+    if (occupied && t) {
+      if (t.unitId) get().select({ kind: "unit", id: t.unitId, x, y });
+      else if (t.trapId) get().select({ kind: "trap", id: t.trapId, x, y });
+      else if (t.state === "core") get().select({ kind: "core", x, y });
+      else get().select({ kind: "entrance", x, y });
+      if (tool !== "select") set({ tool: "select" });
+      return;
+    }
+
     if (tool === "dig") err = sim.digTile(run, x, y);
     else if (tool === "placeUnit" && buyDefId) err = sim.placeUnit(run, buyDefId, x, y, turretMode);
     else if (tool === "placeTrap" && buyDefId) err = sim.placeTrap(run, buyDefId, x, y);
-    else if (tool === "select") {
-      const t = run.map.tiles[`${x},${y}`];
-      if (t?.unitId) get().select({ kind: "unit", id: t.unitId, x, y });
-      else if (t?.trapId) get().select({ kind: "trap", id: t.trapId, x, y });
-      else if (t?.state === "core") get().select({ kind: "core", x, y });
-      else if (t?.state === "entrance") get().select({ kind: "entrance", x, y });
-      else if (t) get().select({ kind: "tile", x, y });
-      else get().select(null);
+    else { // select tool on an empty tile
+      get().select(t ? { kind: "tile", x, y } : null);
       return;
     }
     if (err) get().setToast(err);

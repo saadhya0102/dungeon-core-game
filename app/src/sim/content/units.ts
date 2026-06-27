@@ -65,7 +65,7 @@ const E: UEntry[] = [
   { id: "dem_demonprince", name: "Demon Prince", family: "demon", tier: 10, role: "capstone", gen: "bruiser", dmg: "arcane", affinities: aff("S", undefined, "S", { fire: "S" }), abilities: [ab("splash", "onHit"), ab("summon", "onWaveStart", { count: 3 }), ab("fear", "passive", {}, 4)] },
 
   // --- Construct ---
-  { id: "con_animarmor", name: "Animated Armor", family: "construct", tier: 1, role: "tank", gen: "tank", dmg: "melee", affinities: aff("C") },
+  { id: "con_animarmor", name: "Animated Armor", family: "construct", tier: 1, role: "bruiser", gen: "bruiser", dmg: "melee", affinities: aff("B") },
   { id: "con_sentry", name: "Clockwork Sentry", family: "construct", tier: 2, role: "ranged", gen: "ranged", dmg: "ranged", affinities: aff(undefined, "B"), turret: true },
   { id: "con_ironguard", name: "Iron Guardian", family: "construct", tier: 3, role: "tank", gen: "tank", dmg: "melee", affinities: aff("C") },
   { id: "con_ballista", name: "Siege Ballista", family: "construct", tier: 4, role: "ranged", gen: "ranged", dmg: "ranged", affinities: aff(undefined, "A"), turret: true },
@@ -78,7 +78,7 @@ const E: UEntry[] = [
   { id: "con_worldengine", name: "World Engine", family: "construct", tier: 10, role: "capstone", gen: "colossus", dmg: "melee", affinities: aff("S", "A", "A"), abilities: [ab("partyBuff", "passive", { def: 0.15 }, 6), ab("splash", "onHit")], turret: true },
 
   // --- Aberration ---
-  { id: "abr_ooze", name: "Gray Ooze", family: "aberration", tier: 1, role: "tank", gen: "tank", dmg: "melee", affinities: aff("C", undefined, undefined, { nature: "C" }) },
+  { id: "abr_ooze", name: "Gray Ooze", family: "aberration", tier: 1, role: "melee", gen: "bruiser", dmg: "melee", affinities: aff("B", undefined, undefined, { nature: "C" }), abilities: [ab("slowOnHit", "onHit", { pct: 0.25 })] },
   { id: "abr_gazer", name: "Lesser Gazer", family: "aberration", tier: 2, role: "caster", gen: "caster", dmg: "arcane", affinities: aff(undefined, undefined, "B") },
   { id: "abr_mindling", name: "Mind-Eater Spawn", family: "aberration", tier: 3, role: "control", gen: "caster", dmg: "arcane", affinities: aff(undefined, undefined, "A", { shadow: "B" }), abilities: [ab("slowOnHit", "onHit", { pct: 0.3 })] },
   { id: "abr_chokethorn", name: "Chokethorn", family: "aberration", tier: 4, role: "control", gen: "caster", dmg: "arcane", affinities: aff(undefined, undefined, "B", { nature: "A" }), abilities: [ab("slowOnHit", "onHit", { pct: 0.4 }), ab("splash", "onHit")] },

@@ -26,7 +26,7 @@ export function tierBand(wave: number): [number, number] {
 }
 
 // First N waves are strictly single adventurers (gentle onboarding).
-const SOLO_UNTIL = 5;
+const SOLO_UNTIL = 6;
 // Milestone "army" waves begin here, then every MILESTONE_GAP waves.
 const MILESTONE_START = 20;
 const MILESTONE_GAP = 10;
@@ -38,7 +38,7 @@ export function isMilestone(wave: number): boolean {
 /** Upper bound on group size at a given wave (smooth, no sudden jumps). */
 export function maxGroupSize(wave: number): number {
   if (wave <= SOLO_UNTIL) return 1;
-  return 2 + Math.floor((wave - (SOLO_UNTIL + 1)) / 3);
+  return 1 + Math.floor((wave - (SOLO_UNTIL + 1)) / 3);
 }
 
 /** Roll an actual group size: weighted toward the smaller end, growing with wave. */
@@ -67,11 +67,11 @@ const ROLE_RATIOS: Record<GroupType, Record<Archetype, number>> = {
 const ARCHES: Archetype[] = ["warrior", "archer", "mage", "rogue"];
 
 function rollUniqueCount(wave: number, size: number, milestone: boolean, rng: PRNG): number {
-  if (wave <= SOLO_UNTIL) return 0;
+  if (wave < 8) return 0;
   if (milestone) return 1 + (wave >= 40 && rng.bool(0.5) ? 1 : 0);
   if (size >= 10) return rng.bool(0.5) ? 1 : 0;
   if (size >= 4) return rng.bool(0.3) ? 1 : 0;
-  if (wave >= 10) return rng.bool(0.12) ? 1 : 0;
+  if (wave >= 12) return rng.bool(0.12) ? 1 : 0;
   return 0;
 }
 
@@ -102,7 +102,7 @@ export function generateWave(wave: number, seedRoot: number): WaveDef {
   const milestone = isMilestone(wave);
 
   let size = rollGroupSize(wave, rng);
-  if (milestone) size = Math.round(maxGroupSize(wave) * 1.3) + 2;
+  if (milestone) size = Math.round(maxGroupSize(wave) * 1.15) + 1;
 
   const invaders: WaveInvader[] = [];
   const addUnique = (arch: Archetype) => {

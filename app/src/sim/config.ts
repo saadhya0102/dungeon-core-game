@@ -17,27 +17,30 @@ export const CONFIG = {
   },
 
   // Economy (docs/02)
-  STARTING_DP: 100,
-  BASE_KILL: 4,
+  STARTING_DP: 150,
+  BASE_KILL: 8,
   UNIQUE_DP_MULT: 5,
-  WAVE_CLEAR_BASE: 25,
-  WAVE_CLEAR_GROWTH: 0.15,
+  WAVE_CLEAR_BASE: 40,
+  WAVE_CLEAR_GROWTH: 0.4,
+  // Extra DP scaling for surviving deep waves (keeps income ahead of costs late).
+  WAVE_CLEAR_LATE_POW: 1.4,
   UNIT_COST_BASE: 6,
   TURRET_COST_MULT: 0.9,
+  CORE_COST_MULT: 1.1, // core upgrades scale a bit steeper (push toward more rooms/units)
   SELL_REFUND: 0.6,
   SELL_REFUND_TRAP: 0.5,
   DIG_REFUND: 0.4,
   SALVAGE_REFUND: 0.25,
 
   // Map / digging (docs/03)
-  DIG_BASE: 8,
-  DIG_GROWTH: 0.5,
+  DIG_BASE: 4,
+  DIG_GROWTH: 0.2,
   ENTRANCE_SAFE_RADIUS: 2,
   CORE_NOBUILD_HALO: 1,
   // A unit may be "close" to at most this many other units (within NEARBY_RADIUS
   // Chebyshev tiles). Encourages spreading the army across multiple rooms.
   MAX_NEARBY_UNITS: 5,
-  NEARBY_RADIUS: 2,
+  NEARBY_RADIUS: 3,
 
   // Research (docs/06)
   RES_BASE: 40,
@@ -71,9 +74,9 @@ export const CONFIG = {
   MILESTONE_EVERY: 5,
   UNIQUE_STAT_MULT_RANGE: [1.25, 1.6] as [number, number],
 
-  // H2H (docs/12)
-  H2H_BASELINE_BASE: 55,
-  H2H_BASELINE_GROWTH: 1.3,
+  // H2H (docs/12) - rounds map to gentle normal-wave checkpoints (h2hEffectiveWave)
+  H2H_WAVE_BASE: 8,
+  H2H_WAVE_STEP: 2,
   H2H_MAX_ROUNDS: 12,
 };
 

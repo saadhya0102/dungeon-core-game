@@ -5,7 +5,7 @@ import { TRAPS } from "../sim/content/traps";
 import { RESEARCH, researchByBranch } from "../sim/content/research";
 import {
   unitCost, turretCost, gearPrice, salvageValue, coreLevelRow, spaceCost,
-  capacityMax, capacityUsed, unlockedUnits, FAMILIES,
+  capacityMax, capacityUsed, unlockedUnits, FAMILIES, clUpgradeCost,
 } from "../sim";
 import type { ResearchBranch } from "../sim/types";
 import { abilityList, abilityTooltip } from "./abilityText";
@@ -136,7 +136,7 @@ function ResearchPanel() {
   return (
     <div>
       <PanelHeader title="Research" />
-      <div className="hint">Research tier R{rTier} available (raise Core Level for more). Family upgrades buff all units of that family.</div>
+      <div className="hint">Research tier R{rTier} available (raise Core Level for more). Faction upgrades buff all units of that faction.</div>
       <div className="tabs">
         {branches.map((b) => (
           <button key={b} className={branch === b ? "active" : ""} style={{ textTransform: "capitalize" }} onClick={() => setBranch(b)}>{b}</button>
@@ -210,6 +210,7 @@ function CorePanel() {
   if (run.core.level >= 20) return <div><PanelHeader title="Core" /><div>Core is at maximum level.</div></div>;
   const cur = coreLevelRow(run.core.level);
   const next = coreLevelRow(run.core.level + 1);
+  const upgradeCost = clUpgradeCost(run.core.level);
   return (
     <div>
       <PanelHeader title={`Core Level ${run.core.level} -> ${run.core.level + 1}`} />
@@ -221,9 +222,9 @@ function CorePanel() {
         <div className="card"><div className="name">Research Tier</div><div className="meta">R{cur.researchTier} &rarr; R{next.researchTier}</div></div>
       </div>
       <button className="primary big" style={{ marginTop: 12, width: "100%" }}
-        disabled={run.dp < next.cost}
+        disabled={run.dp < upgradeCost}
         onClick={() => { upgrade(); useStore.getState().setPanel(null); }}>
-        Upgrade ({next.cost} DP)
+        Upgrade ({upgradeCost} DP)
       </button>
     </div>
   );

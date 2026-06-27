@@ -8,24 +8,16 @@ import type {
   Tier, Archetype, RunStats,
 } from "./types";
 import { CONFIG, SIM_VERSION } from "./config";
-import { makePRNG, hashSeed } from "./rng";
+import { hashSeed } from "./rng";
 import { resolveWave } from "./resolve";
-import { generateWave, tierBand } from "./wavegen";
+import { generateWave } from "./wavegen";
 import { classForTier } from "./content/enemies";
-import { powerScore } from "./power";
-
-const ARCHES: Archetype[] = ["warrior", "archer", "mage", "rogue"];
 
 function zeroStats(): RunStats {
   return {
     kills: 0, killsByTrap: 0, uniquesKilled: 0, roguesKilled: 0,
     dpEarned: 0, dpSpent: 0, wavesCleared: 0, bestWave: 0, drops: 0, flawlessWaves: 0,
   };
-}
-
-/** Power-score based threat cost of a single (statMult=1) adventurer. Mirrors wavegen. */
-function classCost(cls: ReturnType<typeof classForTier>): number {
-  return Math.max(4, Math.round((powerScore(cls.stats) / 100) * 4));
 }
 
 /**
@@ -83,56 +75,38 @@ export interface H2HMatchResult {
  * generated wave, plus an escalating baseline of extra adventurers, plus any
  * extra adventurers bought via the interactive lever.
  */
+/**
+ * Map an H2H round to an "effective wave" so the difficulty mirrors where a
+ * normal player would be at gentle checkpoints, instead of a brutal baseline.
+ * round 1-3 ~ a small T1-T3 party; then it climbs slowly (T1-T4, etc).
+ */
+export function h2hEffectiveWave(round: number): number {
+  return CONFIG.H2H_WAVE_BASE + round * CONFIG.H2H_WAVE_STEP;
+}
+
 export function buildSharedWave(
   round: number,
   matchSeed: number,
   maxCl: number,
   extraBuys: H2HExtraBuy[],
 ): WaveDef {
-  const base = generateWave(round, matchSeed);
-  const rng = makePRNG(hashSeed(matchSeed, round, 0xb45e));
+  void maxCl;
+  // Generate a normal wave at the (gentle) effective-wave checkpoint.
+  const effWave = h2hEffectiveWave(round);
+  const base = generateWave(effWave, hashSeed(matchSeed, round, 0x77a1));
 
-  const band = tierBand(round + maxCl);
-  const lo = Math.max(1, Math.min(10, band[0]));
-  const hi = Math.max(lo, Math.min(10, band[1]));
+  const invaders: WaveInvader[] = base.invaders.map((inv, i) => ({ ...inv, id: `h2h_${round}_${i}` }));
+  let counter = invaders.length;
 
-  const invaders: WaveInvader[] = [...base.invaders];
-  let counter = 0;
-  const addInvader = (cls: ReturnType<typeof classForTier>): void => {
-    invaders.push({
-      id: `h2h_${round}_${counter++}`,
-      classId: cls.id,
-      tier: cls.tier,
-      isUnique: false,
-      statMult: 1,
-    });
-  };
-
-  // Escalating baseline, spent on adventurers within the scaled tier band.
-  let budget = Math.round(CONFIG.H2H_BASELINE_BASE * Math.pow(CONFIG.H2H_BASELINE_GROWTH, round - 1));
-  let guard = 0;
-  while (budget > 4 && guard < 1000) {
-    guard++;
-    const arch = rng.pick(ARCHES);
-    const tier = (lo + rng.int(hi - lo + 1)) as Tier;
-    let cls = classForTier(arch, tier);
-    let cost = classCost(cls);
-    if (cost > budget) {
-      cls = classForTier(arch, lo as Tier);
-      cost = classCost(cls);
-      if (cost > budget) break;
-    }
-    addInvader(cls);
-    budget -= cost;
-  }
-
-  // Extra adventurers bought for this round (attack both dungeons).
+  // Only the players' bought adventurers add extra pressure on top.
   for (const buy of extraBuys) {
     const cls = classForTier(buy.archetype, buy.tier);
-    for (let k = 0; k < buy.count; k++) addInvader(cls);
+    for (let k = 0; k < buy.count; k++) {
+      invaders.push({ id: `h2h_${round}_${counter++}`, classId: cls.id, tier: cls.tier, isUnique: false, statMult: 1 });
+    }
   }
 
-  return { ...base, invaders };
+  return { ...base, wave: round, invaders };
 }
 
 /**

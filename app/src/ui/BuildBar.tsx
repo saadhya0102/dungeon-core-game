@@ -12,7 +12,6 @@ export function BuildBar() {
 
   return (
     <div className="buildbar">
-      <button className={tool === "select" ? "active" : ""} onClick={() => setTool("select")}>Select</button>
       <button className={tool === "dig" ? "active" : ""} onClick={() => setTool("dig")}>Dig (pickaxe)</button>
       <button onClick={() => setPanel("units")}>Units</button>
       <button onClick={() => setPanel("traps")}>Traps</button>
