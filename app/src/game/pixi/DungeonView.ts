@@ -42,6 +42,7 @@ export class DungeonView {
   private centerTarget: { x: number; y: number } | null = null;
   private userMoved = false;
   private parent: HTMLElement;
+  private ro: ResizeObserver | null = null;
   private camX = 0;
   private camY = 0;
   private zoom = 1;
@@ -79,7 +80,6 @@ export class DungeonView {
     if (this.inited) return;
     await this.app.init({
       background: 0x0e0f1a,
-      resizeTo: this.parent,
       antialias: true,
       autoDensity: true,
       sharedTicker: false, // each view drives its own ticker (needed for H2H split-screen)
@@ -95,11 +95,30 @@ export class DungeonView {
     this.app.ticker.add(() => this.tick());
     this.app.ticker.start();
     this.inited = true;
+    // Track the host element's size directly. resizeTo only re-measures on window
+    // resize, which misses panels that finish laying out later (e.g. the H2H
+    // split-screen), leaving one canvas stuck at 0x0 and rendering nothing.
+    this.ro = new ResizeObserver(() => this.handleResize());
+    this.ro.observe(this.parent);
+    this.handleResize();
+    this.tryCenter();
+  }
+
+  private handleResize() {
+    if (!this.inited || this.destroyed) return;
+    const w = Math.floor(this.parent.clientWidth);
+    const h = Math.floor(this.parent.clientHeight);
+    if (w <= 0 || h <= 0) return;
+    if (this.app.screen.width === w && this.app.screen.height === h) return;
+    this.app.renderer.resize(w, h);
+    this.app.stage.hitArea = this.app.screen;
     this.tryCenter();
   }
 
   destroy() {
     this.destroyed = true;
+    try { this.ro?.disconnect(); } catch { /* ignore */ }
+    this.ro = null;
     if (this.inited) {
       try { this.app.destroy(true, { children: true }); } catch { /* not yet inited */ }
     }
