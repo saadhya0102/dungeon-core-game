@@ -165,17 +165,14 @@ export function GuidedTutorial() {
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60, pointerEvents: "none" }}>
-      {/* Spotlight: dims everything except the anchored region */}
+      {/* Highlight the anchored region WITHOUT dimming the rest (so you can click). */}
       {spot && (
         <div style={{
           position: "fixed", ...spot, borderRadius: 10,
-          boxShadow: "0 0 0 9999px rgba(6,7,16,0.74)",
+          boxShadow: "0 0 0 3px rgba(185,140,255,0.55), 0 0 22px 4px rgba(185,140,255,0.45)",
           border: "2px solid var(--accent)", pointerEvents: "none",
           transition: "all .2s ease",
         }} />
-      )}
-      {!spot && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(6,7,16,0.74)", pointerEvents: "none" }} />
       )}
 
       {/* Coachmark card */}
