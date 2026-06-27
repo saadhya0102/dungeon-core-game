@@ -34,26 +34,34 @@ export function roomOpen(map: DungeonMap, cx: number, cy: number, r: number): bo
 }
 
 /**
- * Line of sight between two tiles, blocked by unexplored/wall terrain
- * (docs/10 §6). Uses a tile supercover walk; endpoints are not checked.
+ * Line of sight between two tiles, blocked by unexplored/stone terrain
+ * (docs/10 §6). Endpoints are never checked (a unit can always "see itself"
+ * and its own target tile). Uses a corner-aware Bresenham walk:
+ *  - intermediate tiles on the line must be passable
+ *  - a diagonal step is only blocked when BOTH flanking tiles are stone (a true
+ *    corner). This prevents archers from shooting through a 1-tile diagonal gap
+ *    between two walls, while still letting them fire along corridors / within
+ *    rooms when the ray merely grazes a wall corner.
  */
 export function hasLineOfSight(map: DungeonMap, x0: number, y0: number, x1: number, y1: number): boolean {
-  let dx = Math.abs(x1 - x0);
-  let dy = Math.abs(y1 - y0);
+  const dx = Math.abs(x1 - x0);
+  const dy = Math.abs(y1 - y0);
   const sx = x0 < x1 ? 1 : -1;
   const sy = y0 < y1 ? 1 : -1;
   let err = dx - dy;
   let x = x0, y = y0;
-  // walk from start to end; check intermediate tiles only
-  // guard against infinite loops
   let guard = dx + dy + 2;
   while (guard-- > 0) {
-    if (x === x1 && y === y1) return true;
     const e2 = 2 * err;
-    if (e2 > -dy) { err -= dy; x += sx; }
-    if (e2 < dx) { err += dx; y += sy; }
-    if (x === x1 && y === y1) return true;
-    if (!isPassable(map, x, y)) return false; // stone/wall blocks sight
+    let movedX = false, movedY = false;
+    if (e2 > -dy) { err -= dy; x += sx; movedX = true; }
+    if (e2 < dx) { err += dx; y += sy; movedY = true; }
+    if (x === x1 && y === y1) return true; // reached target tile (endpoint not checked)
+    if (movedX && movedY) {
+      // crossing a corner: blocked only if both flanking tiles are stone
+      if (!isPassable(map, x - sx, y) && !isPassable(map, x, y - sy)) return false;
+    }
+    if (!isPassable(map, x, y)) return false; // stone/unexplored blocks sight
   }
   return true;
 }
