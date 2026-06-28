@@ -43,6 +43,7 @@ export class DungeonView {
   private userMoved = false;
   private parent: HTMLElement;
   private ro: ResizeObserver | null = null;
+  private manual = false; // when true, replay is driven externally via frameStep()
   private camX = 0;
   private camY = 0;
   private zoom = 1;
@@ -71,8 +72,9 @@ export class DungeonView {
   private replaying = false;
   private onCursor: (t: number) => void = () => {};
 
-  constructor(parent: HTMLElement) {
+  constructor(parent: HTMLElement, opts?: { manual?: boolean }) {
     this.parent = parent;
+    this.manual = opts?.manual ?? false;
     this.app = new Application();
   }
 
@@ -92,8 +94,13 @@ export class DungeonView {
     this.app.stage.eventMode = "static";
     this.app.stage.hitArea = this.app.screen;
     this.bindEvents();
-    this.app.ticker.add(() => this.tick());
-    this.app.ticker.start();
+    if (this.manual) {
+      // Externally driven (e.g. H2H split-screen): owner calls frameStep() + render.
+      this.app.ticker.stop();
+    } else {
+      this.app.ticker.add(() => this.tick());
+      this.app.ticker.start();
+    }
     this.inited = true;
     // Track the host element's size directly. resizeTo only re-measures on window
     // resize, which misses panels that finish laying out later (e.g. the H2H
@@ -317,8 +324,20 @@ export class DungeonView {
 
   stopReplay() { this.replaying = false; }
 
-  private tick() {
-    const dtReal = this.app.ticker.deltaMS / 1000;
+  /**
+   * Advance + render one frame using an externally supplied delta (ms). Used by
+   * the H2H split-screen so both dungeons are driven by ONE clock and always
+   * stay in lockstep regardless of per-canvas ticker timing.
+   */
+  frameStep(dtMs: number) {
+    if (!this.inited || this.destroyed) return;
+    this.tick(dtMs);
+    try { this.app.renderer.render(this.app.stage); } catch { /* renderer torn down */ }
+  }
+
+  private tick(dtMsArg?: number) {
+    const dtMs = dtMsArg ?? this.app.ticker.deltaMS;
+    const dtReal = dtMs / 1000;
     if (!this.userMoved) this.tryCenter();
     if (!this.replaying || !this.timeline) {
       for (const s of this.buildSprites) s.update(dtReal);
@@ -326,7 +345,7 @@ export class DungeonView {
     }
     const tl = this.timeline;
     const speed = this.getSpeed();
-    this.cursor += (this.app.ticker.deltaMS / 100) * speed;
+    this.cursor += (dtMs / 100) * speed;
     const ended = this.cursor >= tl.durationTicks;
     if (ended) this.cursor = tl.durationTicks;
 
@@ -342,7 +361,7 @@ export class DungeonView {
       e.anim.update(dtAnim);
       if (e.anim.dead) { e.anim.root.destroy({ children: true }); this.spriteById.delete(id); this.lastPos.delete(id); }
     }
-    this.updateFx((this.app.ticker.deltaMS / 16.6667) * Math.max(1, speed));
+    this.updateFx((dtMs / 16.6667) * Math.max(1, speed));
 
     if (ended) { this.replaying = false; this.onReplayEnd(); }
   }

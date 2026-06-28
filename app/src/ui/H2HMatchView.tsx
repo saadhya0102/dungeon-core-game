@@ -6,10 +6,11 @@ import type { Snapshot, H2HMatchResult } from "../sim";
 
 const SPEEDS = [0.5, 1, 2, 4];
 
-export function H2HMatchView({ challenger, opponent, result, onClose }: {
+export function H2HMatchView({ challenger, opponent, result, ratingDelta, onClose }: {
   challenger: Snapshot;
   opponent: Snapshot;
   result: H2HMatchResult;
+  ratingDelta?: number;
   onClose: () => void;
 }) {
   const leftHost = useRef<HTMLDivElement>(null);
@@ -28,12 +29,12 @@ export function H2HMatchView({ challenger, opponent, result, onClose }: {
   speedRef.current = speed;
   playingRef.current = playing;
 
-  // Create the two Pixi views once.
+  // Create the two Pixi views once (manual mode: we drive them with one clock).
   useEffect(() => {
     if (!leftHost.current || !rightHost.current) return;
     let cancelled = false;
-    const lv = new DungeonView(leftHost.current);
-    const rv = new DungeonView(rightHost.current);
+    const lv = new DungeonView(leftHost.current, { manual: true });
+    const rv = new DungeonView(rightHost.current, { manual: true });
     leftView.current = lv; rightView.current = rv;
     Promise.all([lv.init(), rv.init()]).then(() => { if (!cancelled) setReady(true); });
     return () => {
@@ -44,7 +45,25 @@ export function H2HMatchView({ challenger, opponent, result, onClose }: {
     };
   }, []);
 
-  // Play the current round on both sides (once the views are ready).
+  // ONE shared animation clock drives BOTH views in lockstep. This avoids the
+  // per-canvas ticker desync that left one side frozen.
+  useEffect(() => {
+    if (!ready) return;
+    let raf = 0;
+    let last = performance.now();
+    const loop = () => {
+      const now = performance.now();
+      const dt = Math.min(50, now - last);
+      last = now;
+      leftView.current?.frameStep(dt);
+      rightView.current?.frameStep(dt);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [ready]);
+
+  // Set up the current round on both sides (once the views are ready).
   useEffect(() => {
     if (!ready) return;
     const lv = leftView.current, rv = rightView.current;
@@ -96,6 +115,11 @@ export function H2HMatchView({ challenger, opponent, result, onClose }: {
           {roundDone && isLast && (
             <b style={{ color: result.winner === "challenger" ? "var(--good)" : result.winner === "opponent" ? "var(--danger)" : "var(--muted)" }}>
               {result.winner === "challenger" ? "VICTORY" : result.winner === "opponent" ? "DEFEAT" : "DRAW"}
+              {ratingDelta !== undefined && (
+                <span style={{ marginLeft: 8, color: ratingDelta >= 0 ? "var(--good)" : "var(--danger)" }}>
+                  {ratingDelta >= 0 ? `+${ratingDelta}` : ratingDelta} rating
+                </span>
+              )}
             </b>
           )}
         </div>

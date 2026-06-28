@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { useStore } from "../state/store";
-import { loadSnapshots, loadPoolOpponents, getMainId } from "../net/persistence";
+import { loadSnapshots, loadPoolOpponents, getMainId, getRating, setRating } from "../net/persistence";
 import {
   createNewRun, placeUnit, upgradeCore, resolveH2HMatch, ORIGIN, SIM_VERSION,
+  getLadderBots, ratingDelta,
 } from "../sim";
 import type { H2HMatchResult, H2HExtraBuy } from "../sim";
 import type { Snapshot, Archetype, Tier } from "../sim/types";
@@ -41,6 +43,17 @@ function sample<T>(arr: T[], n: number): T[] {
   return a.slice(0, n);
 }
 
+function PlayerRow({ rank, rating }: { rank: number; rating: number }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", background: "rgba(227,195,78,0.12)", borderTop: "1px solid var(--border)" }}>
+      <span className="small" style={{ width: 30, color: "var(--gold)" }}>#{rank}</span>
+      <span style={{ flex: 1, fontWeight: 700, color: "var(--gold)" }}>YOU</span>
+      <span className="small" />
+      <b style={{ width: 56, textAlign: "right", color: "var(--gold)" }}>{rating}</b>
+    </div>
+  );
+}
+
 export function H2H({ onClose }: { onClose: () => void }) {
   const uid = useStore((s) => s.uid);
   const [snaps, setSnaps] = useState<Snapshot[]>([]);
@@ -49,9 +62,17 @@ export function H2H({ onClose }: { onClose: () => void }) {
   const [challenger, setChallenger] = useState<Snapshot | null>(null);
   const [shownOpponents, setShownOpponents] = useState<Snapshot[]>([]);
   const [buys, setBuys] = useState<H2HExtraBuy[]>([]);
-  const [match, setMatch] = useState<{ opp: Snapshot; result: H2HMatchResult } | null>(null);
+  const [match, setMatch] = useState<{ opp: Snapshot; result: H2HMatchResult; delta: number } | null>(null);
+  const [rating, setRatingState] = useState(() => getRating(uid));
 
   const mainId = useMemo(() => getMainId(uid), [uid]);
+  const ladder = useMemo(() => getLadderBots(), []);
+  // Real players' Main dungeons first, then the ladder bots ("subagent" accounts).
+  const allOpps = useMemo(() => [...pool, ...ladder], [pool, ladder]);
+  // Ladder display: everyone sorted by rating (descending).
+  const ranked = useMemo(() => [...allOpps].sort((a, b) => b.rating - a.rating), [allOpps]);
+
+  useEffect(() => { setRatingState(getRating(uid)); }, [uid]);
 
   useEffect(() => {
     Promise.all([loadSnapshots(uid), loadPoolOpponents(uid)])
@@ -60,18 +81,23 @@ export function H2H({ onClose }: { onClose: () => void }) {
         setPool(p);
         const main = s.find((x) => x.id === mainId) ?? s[0] ?? null;
         setChallenger(main);
-        setShownOpponents(sample(p, 4));
+        setShownOpponents(sample([...p, ...getLadderBots()], 4));
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, [uid, mainId]);
 
-  function reroll() { setShownOpponents(sample(pool, 4)); }
+  function reroll() { setShownOpponents(sample(allOpps, 4)); }
 
   function fight(opp: Snapshot) {
     if (!challenger) return;
     const result = resolveH2HMatch(challenger, opp, undefined, () => buys);
-    setMatch({ opp, result });
+    const score = result.winner === "challenger" ? 1 : result.winner === "draw" ? 0.5 : 0;
+    const delta = ratingDelta(rating, opp.rating, score);
+    const next = rating + delta;
+    setRating(uid, next);
+    setRatingState(next);
+    setMatch({ opp, result, delta });
   }
 
   function toggleBuy(b: H2HExtraBuy) {
@@ -79,7 +105,7 @@ export function H2H({ onClose }: { onClose: () => void }) {
   }
 
   if (match && challenger) {
-    return <H2HMatchView challenger={challenger} opponent={match.opp} result={match.result} onClose={() => setMatch(null)} />;
+    return <H2HMatchView challenger={challenger} opponent={match.opp} result={match.result} ratingDelta={match.delta} onClose={() => setMatch(null)} />;
   }
 
   return (
@@ -87,9 +113,12 @@ export function H2H({ onClose }: { onClose: () => void }) {
       <div className="panel">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2>Head-to-Head</h2>
-          <button onClick={onClose}>Close</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span className="small">Your rating <b style={{ color: "var(--gold)", fontSize: 16 }}>{rating}</b></span>
+            <button onClick={onClose}>Close</button>
+          </div>
         </div>
-        <div className="hint">Both dungeons face the same escalating waves &mdash; last core standing wins. Watch it play out in split-screen.</div>
+        <div className="hint">Both dungeons face the same escalating waves &mdash; last core standing wins. Watch it play out in split-screen. Climb the ladder by beating higher-rated dungeons.</div>
 
         {loading && <div>Loading&hellip;</div>}
 
@@ -126,12 +155,9 @@ export function H2H({ onClose }: { onClose: () => void }) {
             </div>
 
             <div className="section-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>Opponents (other players' Main dungeons)</span>
-              <button className="small" onClick={reroll} disabled={pool.length === 0}>Reroll</button>
+              <span>Featured opponents</span>
+              <button className="small" onClick={reroll} disabled={allOpps.length === 0}>Reroll</button>
             </div>
-            {shownOpponents.length === 0 && (
-              <div className="small">No other players' dungeons available yet. Set a Main so others can face you, or fight a practice bot below.</div>
-            )}
             <div className="grid-cards">
               {shownOpponents.map((s) => (
                 <div key={s.id} className="card" onClick={() => challenger && fight(s)}>
@@ -142,11 +168,31 @@ export function H2H({ onClose }: { onClose: () => void }) {
               ))}
             </div>
 
-            <div className="section-title">Practice</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="primary" disabled={!challenger} onClick={() => fight(makeBot(uid, 777, 3))}>Practice Bot (CL4)</button>
-              <button className="primary" disabled={!challenger} onClick={() => fight(makeBot(uid, 999, 6))}>Tough Bot (CL7)</button>
+            <div className="section-title">Ladder</div>
+            <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
+              {(() => {
+                let insertAt = ranked.findIndex((s) => s.rating <= rating);
+                if (insertAt === -1) insertAt = ranked.length;
+                const rows: ReactNode[] = [];
+                ranked.forEach((s, i) => {
+                  if (i === insertAt) rows.push(<PlayerRow key="__you" rank={insertAt + 1} rating={rating} />);
+                  const isReal = pool.some((p) => p.id === s.id);
+                  rows.push(
+                    <div key={s.id} className="ladder-row" onClick={() => challenger && fight(s)}
+                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", cursor: challenger ? "pointer" : "default", borderTop: "1px solid var(--border)" }}>
+                      <span className="small" style={{ width: 30, color: "var(--muted)" }}>#{i + 1 + (i >= insertAt ? 1 : 0)}</span>
+                      <span style={{ flex: 1 }}>{s.name}<span className="small" style={{ color: "var(--muted)" }}>{isReal ? " \u00b7 player" : " \u00b7 bot"}</span></span>
+                      <span className="small">Wave {s.endedAtWave}</span>
+                      <b style={{ width: 56, textAlign: "right", color: "var(--gold)" }}>{s.rating}</b>
+                    </div>,
+                  );
+                });
+                if (insertAt === ranked.length) rows.push(<PlayerRow key="__you" rank={insertAt + 1} rating={rating} />);
+                if (ranked.length === 0) rows.push(<div key="none" className="small" style={{ padding: 10 }}>No opponents yet.</div>);
+                return rows;
+              })()}
             </div>
+            <div className="small" style={{ marginTop: 6 }}>Click any dungeon to challenge it.</div>
           </>
         )}
       </div>

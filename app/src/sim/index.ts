@@ -15,6 +15,7 @@ export {
   resolveH2HMatch, resolveH2HRound, buildSharedWave, frozenToRun,
 } from "./h2h";
 export type { H2HMatchResult, H2HRoundResult, H2HExtraBuy } from "./h2h";
+export { getLadderBots, buildLadderBot, ratingDelta, expectedScore } from "./ladder";
 export { applyWaveResult, capForRun } from "./progress";
 export type { WaveApplyResult } from "./progress";
 export {

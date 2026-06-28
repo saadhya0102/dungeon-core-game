@@ -112,6 +112,21 @@ export async function clearMainDungeon(uid: string): Promise<void> {
   try { await deleteDoc(doc(db, "h2hPool", uid)); } catch { /* ignore */ }
 }
 
+// --- Ladder rating (Elo-lite), per profile. Local-first. ---
+function lsKeyRating(uid: string) { return `dc_rating_${uid}`; }
+const DEFAULT_RATING = 1000;
+
+export function getRating(uid: string): number {
+  try {
+    const r = localStorage.getItem(lsKeyRating(uid));
+    return r ? parseInt(r, 10) : DEFAULT_RATING;
+  } catch { return DEFAULT_RATING; }
+}
+
+export function setRating(uid: string, n: number): void {
+  try { localStorage.setItem(lsKeyRating(uid), String(Math.round(n))); } catch { /* ignore */ }
+}
+
 export async function loadPoolOpponents(uid: string, count = 50): Promise<Snapshot[]> {
   if (!useCloud(uid)) return [];
   try {
