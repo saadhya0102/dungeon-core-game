@@ -76,12 +76,16 @@ export interface H2HMatchResult {
  * extra adventurers bought via the interactive lever.
  */
 /**
- * Map an H2H round to an "effective wave" so the difficulty mirrors where a
- * normal player would be at gentle checkpoints, instead of a brutal baseline.
- * round 1-3 ~ a small T1-T3 party; then it climbs slowly (T1-T4, etc).
+ * Map an H2H round to an "effective wave". The wave scales to the strength of
+ * the dungeons being tested (their max core level) so battles are substantial
+ * instead of a 2-3 unit party that a built-up dungeon deletes in a second, then
+ * escalates each round until one core falls.
  */
-export function h2hEffectiveWave(round: number): number {
-  return CONFIG.H2H_WAVE_BASE + round * CONFIG.H2H_WAVE_STEP;
+export function h2hEffectiveWave(round: number, maxCl: number): number {
+  return Math.max(
+    CONFIG.H2H_WAVE_FLOOR,
+    Math.round(maxCl * CONFIG.H2H_CL_WAVE) + (round - 1) * CONFIG.H2H_WAVE_STEP,
+  );
 }
 
 export function buildSharedWave(
@@ -90,15 +94,23 @@ export function buildSharedWave(
   maxCl: number,
   extraBuys: H2HExtraBuy[],
 ): WaveDef {
-  void maxCl;
-  // Generate a normal wave at the (gentle) effective-wave checkpoint.
-  const effWave = h2hEffectiveWave(round);
+  // Tiers come from the effective wave; the FORCE SIZE is a full siege army so a
+  // built-up dungeon can't delete it in a couple of ticks.
+  const effWave = h2hEffectiveWave(round, maxCl);
+  const target = Math.max(
+    CONFIG.H2H_FORCE_MIN,
+    Math.round(maxCl * CONFIG.H2H_FORCE_CL + round * CONFIG.H2H_FORCE_STEP),
+  );
+
   const base = generateWave(effWave, hashSeed(matchSeed, round, 0x77a1));
+  const pool: WaveInvader[] = [];
+  for (let s = 0; pool.length < target && s < 120; s++) {
+    const w = s === 0 ? base : generateWave(effWave, hashSeed(matchSeed, round, 0x77a1 + s));
+    pool.push(...w.invaders);
+  }
 
-  const invaders: WaveInvader[] = base.invaders.map((inv, i) => ({ ...inv, id: `h2h_${round}_${i}` }));
+  const invaders: WaveInvader[] = pool.slice(0, target).map((inv, i) => ({ ...inv, id: `h2h_${round}_${i}` }));
   let counter = invaders.length;
-
-  // Only the players' bought adventurers add extra pressure on top.
   for (const buy of extraBuys) {
     const cls = classForTier(buy.archetype, buy.tier);
     for (let k = 0; k < buy.count; k++) {

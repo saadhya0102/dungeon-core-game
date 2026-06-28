@@ -74,9 +74,17 @@ export const CONFIG = {
   MILESTONE_EVERY: 5,
   UNIQUE_STAT_MULT_RANGE: [1.25, 1.6] as [number, number],
 
-  // H2H (docs/12) - rounds map to gentle normal-wave checkpoints (h2hEffectiveWave)
-  H2H_WAVE_BASE: 8,
-  H2H_WAVE_STEP: 2,
+  // H2H (docs/12) - the shared wave scales to the dungeons being tested so each
+  // round is a real, watchable battle that escalates until a core falls.
+  H2H_CL_WAVE: 2,     // round-1 effective wave ~= maxCoreLevel * this (sets tiers)
+  H2H_WAVE_STEP: 3,   // + this per round of escalation
+  H2H_WAVE_FLOOR: 4,  // never below this
+  // The shared wave is a full SIEGE FORCE (many invaders), not a small party,
+  // so it actually challenges a built-up dungeon. Force size scales with the
+  // dungeons' core level and the round.
+  H2H_FORCE_CL: 2.5,
+  H2H_FORCE_STEP: 4,
+  H2H_FORCE_MIN: 6,
   H2H_MAX_ROUNDS: 12,
 };
 

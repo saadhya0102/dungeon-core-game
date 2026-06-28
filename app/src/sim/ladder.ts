@@ -16,9 +16,12 @@ import {
 import { isPassable } from "./maputil";
 
 function digArena(run: RunState) {
+  // Keep bot dungeons fairly CONTAINED (not a giant open field) so the core
+  // isn't exposed to long-range line of sight; cap the radius.
   const cap = coreLevelRow(run.core.level).sizeCap;
   const cx = run.map.core.x, cy = run.map.core.y;
-  for (let r = 3; r < 40 && run.map.openedCount < cap; r++) {
+  const maxR = 7;
+  for (let r = 3; r <= maxR && run.map.openedCount < cap; r++) {
     for (let x = cx - r; x <= cx + r; x++) {
       for (let y = cy - r; y <= cy + r; y++) {
         if (run.map.openedCount >= cap) break;
@@ -48,8 +51,13 @@ function fillUnits(run: RunState, faction: Family) {
     .filter((u) => u.family === faction && unlocked.has(u.id) && u.tier <= maxTier)
     .sort((a, b) => b.tier - a.tier);
   if (roster.length === 0) return;
-  const tiles = Object.keys(run.map.tiles);
   const cx = run.map.core.x, cy = run.map.core.y;
+  // Place units closest-to-core first so the core is screened by defenders.
+  const tiles = Object.keys(run.map.tiles).sort((a, b) => {
+    const [ax, ay] = a.split(",").map(Number);
+    const [bx, by] = b.split(",").map(Number);
+    return (Math.abs(ax - cx) + Math.abs(ay - cy)) - (Math.abs(bx - cx) + Math.abs(by - cy));
+  });
   let stuck = 0;
   while (stuck < roster.length + 1) {
     const cap = capacityMax(run), used = capacityUsed(run);

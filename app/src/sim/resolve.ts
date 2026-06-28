@@ -395,8 +395,10 @@ function invaderAct(ctx: Ctx, e: SimEntity) {
   // 1) attack a dungeon unit in range (nearestEnemy already enforces LOS for ranged)
   const target = nearestEnemy(e, ctx.dungeon, ranged, ctx);
   if (target && dist(e, target) <= rangeR) { tryAttack(ctx, e, target); return; }
-  // 2) attack core if in range (ranged need line of sight)
-  if (ctx.core.hp > 0 && dist(e, ctx.core) <= rangeR && (!ranged || losOK(ctx, e, ctx.core))) {
+  // 2) attack core if in range. Ranged attackers will NOT snipe the core while a
+  //    defender is within their sight -- they must deal with the screen first.
+  const nearDefender = !!target && dist(e, target) <= e.stats.aggroRadius;
+  if (ctx.core.hp > 0 && dist(e, ctx.core) <= rangeR && (!ranged || (losOK(ctx, e, ctx.core) && !nearDefender))) {
     tryAttack(ctx, e, ctx.core);
     return;
   }
