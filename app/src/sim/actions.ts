@@ -170,11 +170,17 @@ export function sellUnit(run: RunState, unitId: string): ActionResult {
 }
 
 // --- Traps ---
+/** Max number of traps a dungeon may have active, scaling with core level. */
+export function maxTraps(run: RunState): number {
+  return CONFIG.TRAPS_BASE + Math.floor(run.core.level * CONFIG.TRAPS_PER_CL);
+}
+
 export function placeTrap(run: RunState, defId: string, x: number, y: number): ActionResult {
   const def = TRAP_BY_ID[defId];
   if (!def) return "Unknown trap";
   if (!trapUnlocked(run, def.tier)) return "Trap type not researched";
   if (def.tier > coreLevelRow(run.core.level).maxUnitTier) return "Requires higher Core Level";
+  if (run.traps.length >= maxTraps(run)) return `Trap limit reached (${maxTraps(run)}). Raise Core Level for more.`;
   const t = run.map.tiles[key(x, y)];
   if (!t || t.state !== "floor") return "Must place on open floor";
   if (t.unitId || t.trapId) return "Tile is occupied";

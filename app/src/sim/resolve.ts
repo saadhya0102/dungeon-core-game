@@ -591,7 +591,9 @@ function checkHealAtHalf(ctx: Ctx, e: SimEntity) {
 function applyDamageResolved(ctx: Ctx, att: SimEntity, tgt: SimEntity, dmg: number, crit: boolean) {
   absorb(tgt, dmg);
   if (tgt.id !== "core" && att.id !== tgt.id) { tgt.threatId = att.id; tgt.threatTick = ctx.tick; } // retaliate
-  ctx.events.push({ tick: ctx.tick, type: crit ? "crit" : "hit", sourceId: att.id, targetId: tgt.id, amount: dmg, x: tgt.x, y: tgt.y });
+  // `direct` marks a real aimed attack (LOS-checked) so the renderer only draws
+  // a projectile for these, never for AoE/DoT/thorns splash (which ignore walls).
+  ctx.events.push({ tick: ctx.tick, type: crit ? "crit" : "hit", sourceId: att.id, targetId: tgt.id, amount: dmg, x: tgt.x, y: tgt.y, data: { direct: true } });
   if (tgt.id === "core") ctx.events.push({ tick: ctx.tick, type: "coreHit", sourceId: att.id, amount: dmg });
   checkHealAtHalf(ctx, tgt);
   if (tgt.hp <= 0 && tgt.state !== "dead") killEntity(ctx, tgt, att);

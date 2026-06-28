@@ -484,7 +484,10 @@ export class DungeonView {
       t.anchor.set(0.5); t.position.set(px + (Math.random() * 10 - 5), py - 14);
       this.addFx(t, crit ? 50 : 40, 0, -0.6, 0);
       this.spark(px, py, crit ? 0xffe066 : 0xffffff, crit ? 6 : 3, crit ? 1.7 : 1.1);
-      if (ev.sourceId) {
+      // Only a direct, LOS-checked attack draws a projectile / attacker lunge.
+      // AoE splash, DoT ticks and thorns are not aimed shots and must not fling
+      // arrows through walls.
+      if (ev.sourceId && ev.data?.direct) {
         const entry = this.spriteById.get(ev.sourceId);
         const ap = this.lastPos.get(ev.sourceId);
         if (entry && ap && ev.x !== undefined && ev.y !== undefined) {

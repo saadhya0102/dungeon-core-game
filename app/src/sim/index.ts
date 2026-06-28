@@ -23,7 +23,7 @@ export {
 } from "./combat";
 export type { ResearchMods } from "./combat";
 export {
-  capacityMax, capacityUsed, unlockedUnits,
+  capacityMax, capacityUsed, unlockedUnits, maxTraps,
   digTile, collapseTile, placeUnit, moveUnit, sellUnit,
   placeTrap, sellTrap, moveTrap, moveCore, equipGear, unequipGear, salvageGear,
   buyGear, rerollGearShop, generateShopStock, buyResearch, upgradeCore, moveEntrance,

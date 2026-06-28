@@ -5,7 +5,7 @@ import { TRAPS } from "../sim/content/traps";
 import { RESEARCH, researchByBranch } from "../sim/content/research";
 import {
   unitCost, turretCost, gearPrice, salvageValue, coreLevelRow, spaceCost,
-  capacityMax, capacityUsed, unlockedUnits, FAMILIES, clUpgradeCost,
+  capacityMax, capacityUsed, unlockedUnits, FAMILIES, clUpgradeCost, maxTraps,
 } from "../sim";
 import type { ResearchBranch } from "../sim/types";
 import { abilityList, abilityTooltip } from "./abilityText";
@@ -106,9 +106,11 @@ function TrapsPanel() {
     <div>
       <PanelHeader title="Traps" />
       <div className="hint">Click a trap, then place on floor (not near the entrance/core). Hidden until a rogue reveals it.</div>
+      <div className="hint">Traps placed: <b style={{ color: run.traps.length >= maxTraps(run) ? "var(--danger)" : "var(--gold)" }}>{run.traps.length} / {maxTraps(run)}</b> (raise Core Level for more).</div>
       <div className="grid-cards">
         {TRAPS.map((t) => {
-          const ok = trapUnlocked(t.tier) && t.tier <= maxTier && run.dp >= t.cost;
+          const limitReached = run.traps.length >= maxTraps(run);
+          const ok = trapUnlocked(t.tier) && t.tier <= maxTier && run.dp >= t.cost && !limitReached;
           return (
             <div key={t.id} className={`card ${ok ? "" : "locked"}`}
               onClick={() => { if (!ok) return; setTool("placeTrap", t.id); setPanel(null); }}>

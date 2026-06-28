@@ -41,6 +41,9 @@ export const CONFIG = {
   // Chebyshev tiles). Encourages spreading the army across multiple rooms.
   MAX_NEARBY_UNITS: 5,
   NEARBY_RADIUS: 3,
+  // Trap cap (traps are strong, so limit how many can be active). Grows with CL.
+  TRAPS_BASE: 2,
+  TRAPS_PER_CL: 0.5,
 
   // Research (docs/06)
   RES_BASE: 40,
