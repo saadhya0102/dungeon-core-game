@@ -175,6 +175,10 @@ export function buildDungeonEntities(run: RunState, mods: ResearchMods): SimEnti
 /** Build invader entities from a wave def, spawning at the entrance. */
 export function buildInvaderEntities(wave: WaveDef, entrance: { x: number; y: number }): SimEntity[] {
   const out: SimEntity[] = [];
+  // Large waves trickle in groups so they can't be one-tapped at the entrance.
+  const stagger = wave.invaders.length > CONFIG.WAVE_STAGGER_MIN;
+  const groupSize = Math.max(1, CONFIG.WAVE_STAGGER_GROUP);
+  const intervalTicks = Math.max(1, Math.round(CONFIG.TICKS_PER_SEC * CONFIG.WAVE_STAGGER_SEC));
   wave.invaders.forEach((inv, i) => {
     const cls = CLASS_BY_ID[inv.classId];
     if (!cls) return;
@@ -198,6 +202,7 @@ export function buildInvaderEntities(wave: WaveDef, entrance: { x: number; y: nu
       isUnique: inv.isUnique, revealRadius: cls.revealRadius ?? 0, primaryDamageType: pdt,
     });
     ent.invisible = passives.invisible;
+    ent.spawnTick = stagger ? Math.floor(i / groupSize) * intervalTicks : 0;
     out.push(ent);
   });
   return out;

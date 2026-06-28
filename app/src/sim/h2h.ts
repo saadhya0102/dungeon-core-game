@@ -59,6 +59,8 @@ export interface H2HRoundResult {
   opponentSurvived: boolean;
   challengerCoreHp: number;
   opponentCoreHp: number;
+  challengerTicks: number; // how long this side lasted (tiebreak when both fall)
+  opponentTicks: number;
   challengerTimeline: Timeline;
   opponentTimeline: Timeline;
 }
@@ -147,6 +149,8 @@ export function resolveH2HRound(
     opponentSurvived: opponentTimeline.outcome.coreSurvived,
     challengerCoreHp: challengerTimeline.outcome.coreHpRemaining,
     opponentCoreHp: opponentTimeline.outcome.coreHpRemaining,
+    challengerTicks: challengerTimeline.durationTicks,
+    opponentTicks: opponentTimeline.durationTicks,
     challengerTimeline,
     opponentTimeline,
   };
@@ -195,8 +199,8 @@ export function resolveH2HMatch(
     if (ch && op) continue; // both alive -> escalate next round
     if (ch && !op) { winner = "challenger"; break; }
     if (!ch && op) { winner = "opponent"; break; }
-    // both cores died this round -> tiebreak by remaining core HP
-    winner = tiebreak(res.challengerCoreHp, res.opponentCoreHp);
+    // both cores died this round -> whoever held out LONGER wins
+    winner = tiebreak(res.challengerTicks, res.opponentTicks);
     break;
   }
 

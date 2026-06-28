@@ -85,11 +85,16 @@ export function resolveWave(run: RunState, waveOverride?: WaveDef): Timeline {
   applyWaveStart(ctx);
 
   ctx.events.push({ tick: 0, type: "waveStart", data: { invaders: invaders.length, group: wave.groupType } });
-  for (const e of [...dungeon, ...invaders]) {
+  for (const e of dungeon) {
     ctx.events.push({ tick: 0, type: "spawn", sourceId: e.id, x: e.x, y: e.y, data: { side: e.side, defId: e.defId, tier: e.tier, isUnique: e.isUnique ?? false, name: e.name } });
   }
+  // Invaders may trickle in: emit each spawn at its spawnTick so it appears then.
+  for (const e of invaders) {
+    ctx.events.push({ tick: e.spawnTick ?? 0, type: "spawn", sourceId: e.id, x: e.x, y: e.y, data: { side: e.side, defId: e.defId, tier: e.tier, isUnique: e.isUnique ?? false, name: e.name } });
+  }
 
-  const maxTicks = CONFIG.MAX_TICKS_BASE + invaders.length * 20;
+  const maxSpawnTick = invaders.reduce((m, e) => Math.max(m, e.spawnTick ?? 0), 0);
+  const maxTicks = CONFIG.MAX_TICKS_BASE + invaders.length * 20 + maxSpawnTick;
   let coreSurvived = true;
 
   for (let tick = 1; tick <= maxTicks; tick++) {
@@ -98,8 +103,8 @@ export function resolveWave(run: RunState, waveOverride?: WaveDef): Timeline {
     processRogueReveal(ctx);
     if (ctx.flowDirty) { ctx.flow = buildFlowField(run, traps); ctx.flowDirty = false; }
 
-    // AI + movement + attacks, deterministic order by id
-    const order = [...dungeon, ...invaders].filter((e) => e.state !== "dead").sort((a, b) => (a.id < b.id ? -1 : 1));
+    // AI + movement + attacks, deterministic order by id (skip not-yet-spawned)
+    const order = [...dungeon, ...invaders].filter((e) => e.state !== "dead" && isSpawned(e, tick)).sort((a, b) => (a.id < b.id ? -1 : 1));
     for (const e of order) {
       if (e.state === "dead") continue;
       if (isStunned(e)) continue;
@@ -141,10 +146,16 @@ export function resolveWave(run: RunState, waveOverride?: WaveDef): Timeline {
   };
 }
 
+/** An invader is only on the field once its (staggered) spawn tick has passed. */
+function isSpawned(e: SimEntity, tick: number): boolean {
+  return (e.spawnTick ?? 0) <= tick;
+}
+
 function snapshotFrame(ctx: Ctx) {
   const ents = [];
   for (const e of [ctx.core, ...ctx.dungeon, ...ctx.invaders]) {
     if (e.state === "dead") continue;
+    if (!isSpawned(e, ctx.tick)) continue;
     let fl = 0;
     if (isFrozen(e)) fl |= FLAG_FROZEN;
     if (e.berserk) fl |= FLAG_BERSERK;
@@ -374,6 +385,7 @@ function nearestEnemy(e: SimEntity, pool: SimEntity[], requireLOS: boolean, ctx:
   let bestD = Infinity;
   for (const o of pool) {
     if (o.state === "dead") continue;
+    if (!isSpawned(o, ctx.tick)) continue;
     if (requireLOS && !losOK(ctx, e, o)) continue;
     const d = dist(e, o);
     if (d < bestD) { bestD = d; best = o; }
@@ -458,6 +470,7 @@ function dungeonAct(ctx: Ctx, e: SimEntity) {
 function processHealers(ctx: Ctx) {
   for (const e of ctx.invaders) {
     if (e.state === "dead") continue;
+    if (!isSpawned(e, ctx.tick)) continue;
     const heal = e.abilities.find((a) => a.effect === "healAlly");
     if (!heal) continue;
     const interval = Math.round(heal.params?.intervalTicks ?? 12);

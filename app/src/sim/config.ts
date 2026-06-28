@@ -44,6 +44,11 @@ export const CONFIG = {
   // Trap cap (traps are strong, so limit how many can be active). Grows with CL.
   TRAPS_BASE: 2,
   TRAPS_PER_CL: 0.5,
+  // Large waves trickle in (groups of N every few seconds) instead of all
+  // bunching at the entrance to be one-tapped by AoE.
+  WAVE_STAGGER_MIN: 6,    // only stagger when more than this many invaders
+  WAVE_STAGGER_GROUP: 4,  // invaders per spawn group
+  WAVE_STAGGER_SEC: 2,    // seconds between groups
 
   // Research (docs/06)
   RES_BASE: 40,

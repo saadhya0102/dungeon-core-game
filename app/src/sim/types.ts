@@ -421,6 +421,7 @@ export interface SimEntity {
   healedAtHalf?: boolean;
   berserk?: boolean;
   invisible?: boolean;
+  spawnTick?: number;         // invaders trickle in: not on the field until this tick
   // combat AI runtime state
   threatId?: string;          // last entity that damaged me -> I will path toward it to retaliate
   threatTick?: number;        // tick the threat was last refreshed (for expiry)
