@@ -104,6 +104,7 @@ export function placeUnit(run: RunState, defId: string, x: number, y: number, tu
   const t = run.map.tiles[key(x, y)];
   if (!t || t.state !== "floor") return "Must place on open floor";
   if (t.unitId || t.trapId) return "Tile is occupied";
+  if (manhattan(x, y, run.map.entrance.x, run.map.entrance.y) <= CONFIG.ENTRANCE_SAFE_RADIUS) return "Too close to the entrance";
   const r = roomRadius(def.tier);
   if (r > 0 && !roomOpen(run.map, x, y, r)) {
     const size = r * 2 + 1;
@@ -133,6 +134,7 @@ export function moveUnit(run: RunState, unitId: string, x: number, y: number): A
   const dest = run.map.tiles[key(x, y)];
   if (!dest || dest.state !== "floor") return "Must move to open floor";
   if (dest.unitId || dest.trapId) return "Tile is occupied";
+  if (manhattan(x, y, run.map.entrance.x, run.map.entrance.y) <= CONFIG.ENTRANCE_SAFE_RADIUS) return "Too close to the entrance";
   const def = UNIT_BY_ID[unit.defId];
   if (def) {
     const r = roomRadius(def.tier);
