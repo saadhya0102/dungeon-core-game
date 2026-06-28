@@ -421,6 +421,12 @@ export interface SimEntity {
   healedAtHalf?: boolean;
   berserk?: boolean;
   invisible?: boolean;
+  // combat AI runtime state
+  threatId?: string;          // last entity that damaged me -> I will path toward it to retaliate
+  threatTick?: number;        // tick the threat was last refreshed (for expiry)
+  path?: { x: number; y: number }[]; // cached path (tile centers, excluding current tile)
+  pathGoal?: { x: number; y: number };
+  pathTick?: number;
 }
 
 export type SimEventType =

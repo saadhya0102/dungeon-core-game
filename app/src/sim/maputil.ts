@@ -34,36 +34,101 @@ export function roomOpen(map: DungeonMap, cx: number, cy: number, r: number): bo
 }
 
 /**
- * Line of sight between two tiles, blocked by unexplored/stone terrain
- * (docs/10 §6). Endpoints are never checked (a unit can always "see itself"
- * and its own target tile). Uses a corner-aware Bresenham walk:
- *  - intermediate tiles on the line must be passable
- *  - a diagonal step is only blocked when BOTH flanking tiles are stone (a true
- *    corner). This prevents archers from shooting through a 1-tile diagonal gap
- *    between two walls, while still letting them fire along corridors / within
- *    rooms when the ray merely grazes a wall corner.
+ * Strict line of sight between two tiles (docs/10 §6). Blocked by ANY
+ * stone/unexplored tile the ray passes through. Endpoints are never checked
+ * (a unit can always "see itself" and its own target tile).
+ *
+ * Diagonal corner crossings are STRICT: if either tile flanking the corner is
+ * stone, sight is blocked. This guarantees ranged units can never shoot through
+ * a wall or squeeze a shot past a wall corner. (False negatives in very tight
+ * geometry are acceptable -- units that get hit gain retaliation aggro and will
+ * path around to fight back.)
  */
 export function hasLineOfSight(map: DungeonMap, x0: number, y0: number, x1: number, y1: number): boolean {
-  const dx = Math.abs(x1 - x0);
-  const dy = Math.abs(y1 - y0);
-  const sx = x0 < x1 ? 1 : -1;
-  const sy = y0 < y1 ? 1 : -1;
-  let err = dx - dy;
+  if (x0 === x1 && y0 === y1) return true;
+  const adx = Math.abs(x1 - x0);
+  const ady = Math.abs(y1 - y0);
+  const sx = x1 > x0 ? 1 : -1;
+  const sy = y1 > y0 ? 1 : -1;
   let x = x0, y = y0;
-  let guard = dx + dy + 2;
-  while (guard-- > 0) {
-    const e2 = 2 * err;
-    let movedX = false, movedY = false;
-    if (e2 > -dy) { err -= dy; x += sx; movedX = true; }
-    if (e2 < dx) { err += dx; y += sy; movedY = true; }
-    if (x === x1 && y === y1) return true; // reached target tile (endpoint not checked)
-    if (movedX && movedY) {
-      // crossing a corner: blocked only if both flanking tiles are stone
-      if (!isPassable(map, x - sx, y) && !isPassable(map, x, y - sy)) return false;
+
+  // Axis-aligned: just walk the intermediate tiles.
+  if (adx === 0) {
+    for (let k = 1; k < ady; k++) { y += sy; if (!isPassable(map, x, y)) return false; }
+    return true;
+  }
+  if (ady === 0) {
+    for (let k = 1; k < adx; k++) { x += sx; if (!isPassable(map, x, y)) return false; }
+    return true;
+  }
+
+  // General case: integer supercover walk.
+  let ix = 0, iy = 0;
+  let guard = adx + ady + 2;
+  while ((ix < adx || iy < ady) && guard-- > 0) {
+    const t1 = (1 + 2 * ix) * ady;
+    const t2 = (1 + 2 * iy) * adx;
+    if (t1 === t2) {
+      // exact diagonal corner: both flanking tiles must be open to pass
+      if (!isPassable(map, x + sx, y) || !isPassable(map, x, y + sy)) return false;
+      x += sx; y += sy; ix++; iy++;
+    } else if (t1 < t2) {
+      x += sx; ix++;
+    } else {
+      y += sy; iy++;
     }
-    if (!isPassable(map, x, y)) return false; // stone/unexplored blocks sight
+    if (x === x1 && y === y1) return true; // reached target tile (endpoint not checked)
+    if (!isPassable(map, x, y)) return false;
   }
   return true;
+}
+
+/**
+ * BFS shortest passable path from `from` to `to` (4-connected, stone blocks).
+ * Returns the path as tile centers EXCLUDING the start (last element is the
+ * goal), or null if unreachable within `maxNodes`. Because consecutive nodes
+ * are orthogonally-adjacent passable tiles, following it never crosses a wall.
+ * Deterministic (neighbor order fixed).
+ */
+export function findPath(
+  map: DungeonMap,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  maxNodes = 2500,
+): { x: number; y: number }[] | null {
+  const start = key(from.x, from.y);
+  const goal = key(to.x, to.y);
+  if (start === goal) return [];
+  const prev = new Map<string, string>();
+  const visited = new Set<string>([start]);
+  const queue: [number, number][] = [[from.x, from.y]];
+  let head = 0;
+  let found = false;
+  while (head < queue.length && visited.size <= maxNodes) {
+    const [cx, cy] = queue[head++];
+    for (const [nx, ny] of neighbors(cx, cy)) {
+      const k = key(nx, ny);
+      if (visited.has(k)) continue;
+      if (!isPassable(map, nx, ny)) continue;
+      visited.add(k);
+      prev.set(k, key(cx, cy));
+      if (nx === to.x && ny === to.y) { found = true; break; }
+      queue.push([nx, ny]);
+    }
+    if (found) break;
+  }
+  if (!found) return null;
+  const path: { x: number; y: number }[] = [];
+  let cur = goal;
+  while (cur !== start) {
+    const [px, py] = cur.split(",").map(Number);
+    path.push({ x: px, y: py });
+    const p = prev.get(cur);
+    if (!p) break;
+    cur = p;
+  }
+  path.reverse();
+  return path;
 }
 
 const DIRS: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];

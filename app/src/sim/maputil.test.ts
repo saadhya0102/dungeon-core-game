@@ -61,6 +61,16 @@ describe("line of sight", () => {
     expect(hasLineOfSight(m, 0, 1, 4, 1)).toBe(true);
   });
 
+  it("strictly blocks a diagonal when a flanking corner tile is stone", () => {
+    // wall at (0,1) flanks the (0,0)->(2,2) diagonal corner -> no shooting past it
+    const m = mapFromGrid([
+      "...",
+      "#..",
+      "...",
+    ]);
+    expect(hasLineOfSight(m, 0, 0, 2, 2)).toBe(false);
+  });
+
   it("does not check endpoints (target tile may be a unit/occupied floor)", () => {
     const m = mapFromGrid([
       "...",

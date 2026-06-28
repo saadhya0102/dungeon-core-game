@@ -18,7 +18,7 @@ import { CLASS_BY_ID } from "./content/enemies";
 import { rollDrop } from "./content/gear";
 import { dpKill, dpWaveClear } from "./economy";
 import { powerScore } from "./power";
-import { key, neighbors, isPassable, manhattan, hasLineOfSight } from "./maputil";
+import { key, neighbors, isPassable, manhattan, hasLineOfSight, findPath } from "./maputil";
 
 interface TrapRuntime {
   id: string; defId: string; x: number; y: number;
@@ -320,6 +320,46 @@ function moveToward(e: SimEntity, tx: number, ty: number, perTick: number) {
   e.y += (dy / d) * perTick;
 }
 
+/**
+ * Move toward an arbitrary tile (tx,ty) following a passable BFS path so the
+ * entity NEVER walks through stone/unexplored tiles. Caches the path on the
+ * entity and re-plans when the goal moves or the path goes stale. Returns true
+ * if it produced movement (i.e. a path exists).
+ */
+function moveAlongPath(ctx: Ctx, e: SimEntity, tx: number, ty: number, perTick: number): boolean {
+  const fx = Math.round(e.x), fy = Math.round(e.y);
+  if (fx === tx && fy === ty) { moveToward(e, tx, ty, perTick); return true; }
+  const stale = !e.path || e.path.length === 0 || !e.pathGoal
+    || e.pathGoal.x !== tx || e.pathGoal.y !== ty
+    || (ctx.tick - (e.pathTick ?? -999)) > 12;
+  if (stale) {
+    const p = findPath(ctx.run.map, { x: fx, y: fy }, { x: tx, y: ty });
+    e.path = p ?? [];
+    e.pathGoal = { x: tx, y: ty };
+    e.pathTick = ctx.tick;
+  }
+  // Drop any leading node we've already reached.
+  while (e.path && e.path.length > 0 && Math.round(e.x) === e.path[0].x && Math.round(e.y) === e.path[0].y) {
+    e.path.shift();
+  }
+  if (!e.path || e.path.length === 0) return false;
+  const node = e.path[0];
+  moveToward(e, node.x, node.y, perTick);
+  return true;
+}
+
+const THREAT_TTL = TICKS_PER_SEC * 4; // forget an attacker after 4s without being hit by it
+
+/** The living entity that last damaged `e` (drives retaliation), or null. */
+function threatOf(ctx: Ctx, e: SimEntity): SimEntity | null {
+  if (!e.threatId) return null;
+  if (ctx.tick - (e.threatTick ?? -9999) > THREAT_TTL) { e.threatId = undefined; return null; }
+  const pool = e.side === "dungeon" ? ctx.invaders : ctx.dungeon;
+  const t = pool.find((o) => o.id === e.threatId);
+  if (!t || t.state === "dead") { e.threatId = undefined; return null; }
+  return t;
+}
+
 // --- AI ---
 function isRanged(e: SimEntity): boolean {
   return e.stats.range > 1.6;
@@ -350,31 +390,31 @@ function invaderAct(ctx: Ctx, e: SimEntity) {
   if (e.attackCdTicks > 0) e.attackCdTicks--;
   const rangeR = attackRange(e);
   const ranged = isRanged(e);
-  // 1) attack a dungeon unit in range (ranged need line of sight)
+  const perTick = effMoveSpeed(e) * DT;
+
+  // 1) attack a dungeon unit in range (nearestEnemy already enforces LOS for ranged)
   const target = nearestEnemy(e, ctx.dungeon, ranged, ctx);
-  if (target && dist(e, target) <= rangeR) {
-    tryAttack(ctx, e, target);
-    return;
-  }
+  if (target && dist(e, target) <= rangeR) { tryAttack(ctx, e, target); return; }
   // 2) attack core if in range (ranged need line of sight)
   if (ctx.core.hp > 0 && dist(e, ctx.core) <= rangeR && (!ranged || losOK(ctx, e, ctx.core))) {
     tryAttack(ctx, e, ctx.core);
     return;
   }
-  // 3) chase a nearby dungeon unit if melee-ish and close
-  const perTick = effMoveSpeed(e) * DT;
-  if (target && dist(e, target) <= 3.2 && rangeR <= 1.6) {
-    moveToward(e, target.x, target.y, perTick);
-    triggerTrapsAt(ctx, e);
-    e.state = "moving";
-    return;
+  // 3) retaliate: hunt whoever last damaged me (pathing around walls)
+  const threat = threatOf(ctx, e);
+  if (threat && moveAlongPath(ctx, e, Math.round(threat.x), Math.round(threat.y), perTick)) {
+    triggerTrapsAt(ctx, e); e.state = "moving"; return;
   }
-  // 4) flow toward core
+  // 4) engage the nearest reachable defender within aggro range
+  if (target && dist(e, target) <= e.stats.aggroRadius
+    && moveAlongPath(ctx, e, Math.round(target.x), Math.round(target.y), perTick)) {
+    triggerTrapsAt(ctx, e); e.state = "moving"; return;
+  }
+  // 5) flow toward core (flow field is wall-respecting)
   const step = flowNextStep(ctx, e);
-  if (step) moveToward(e, step.x, step.y, perTick);
-  else moveToward(e, ctx.core.x, ctx.core.y, perTick);
-  triggerTrapsAt(ctx, e);
-  e.state = "moving";
+  if (step) { moveToward(e, step.x, step.y, perTick); triggerTrapsAt(ctx, e); e.state = "moving"; return; }
+  if (moveAlongPath(ctx, e, ctx.core.x, ctx.core.y, perTick)) { triggerTrapsAt(ctx, e); e.state = "moving"; return; }
+  e.state = "idle";
 }
 
 function dungeonAct(ctx: Ctx, e: SimEntity) {
@@ -382,25 +422,35 @@ function dungeonAct(ctx: Ctx, e: SimEntity) {
   if (e.attackCdTicks > 0) e.attackCdTicks--;
   const rangeR = attackRange(e);
   const ranged = isRanged(e);
+  const perTick = effMoveSpeed(e) * DT;
+
   const target = nearestEnemy(e, ctx.invaders, ranged, ctx);
-  if (!target) { e.state = "idle"; return; }
-  const d = dist(e, target);
-  if (d <= rangeR) { tryAttack(ctx, e, target); return; }
-  if (e.isTurret) { e.state = "idle"; return; } // turrets hold position (v1)
-  if (d <= e.stats.aggroRadius) {
-    // move toward target but respect leash from home
-    const perTick = effMoveSpeed(e) * DT;
-    const homeDistIfMove = manhattan(Math.round(e.x), Math.round(e.y), e.homeX, e.homeY);
-    if (homeDistIfMove < CONFIG.LEASH_TILES + 1) {
-      moveToward(e, target.x, target.y, perTick);
-      e.state = "moving";
-      return;
+  if (target && dist(e, target) <= rangeR) { tryAttack(ctx, e, target); return; }
+
+  if (e.isTurret) { e.state = "idle"; return; } // turrets can't move (even to retaliate)
+
+  // Retaliate: hunt whoever last damaged me, ignoring the home leash so ranged
+  // attackers can't whittle a unit down without it fighting back.
+  const threat = threatOf(ctx, e);
+  if (threat && moveAlongPath(ctx, e, Math.round(threat.x), Math.round(threat.y), perTick)) {
+    e.state = "moving"; return;
+  }
+
+  // Otherwise engage a nearby invader, but respect the leash from home.
+  if (target && dist(e, target) <= e.stats.aggroRadius) {
+    const homeDist = manhattan(Math.round(e.x), Math.round(e.y), e.homeX, e.homeY);
+    if (homeDist < CONFIG.LEASH_TILES + 1
+      && moveAlongPath(ctx, e, Math.round(target.x), Math.round(target.y), perTick)) {
+      e.state = "moving"; return;
     }
   }
-  // return home
-  const perTick = effMoveSpeed(e) * DT;
-  if (Math.hypot(e.x - e.homeX, e.y - e.homeY) > 0.1) { moveToward(e, e.homeX, e.homeY, perTick); e.state = "moving"; }
-  else e.state = "idle";
+
+  // Return home.
+  if (Math.hypot(e.x - e.homeX, e.y - e.homeY) > 0.1
+    && moveAlongPath(ctx, e, e.homeX, e.homeY, perTick)) {
+    e.state = "moving"; return;
+  }
+  e.state = "idle";
 }
 
 function processHealers(ctx: Ctx) {
@@ -538,6 +588,7 @@ function checkHealAtHalf(ctx: Ctx, e: SimEntity) {
 
 function applyDamageResolved(ctx: Ctx, att: SimEntity, tgt: SimEntity, dmg: number, crit: boolean) {
   absorb(tgt, dmg);
+  if (tgt.id !== "core" && att.id !== tgt.id) { tgt.threatId = att.id; tgt.threatTick = ctx.tick; } // retaliate
   ctx.events.push({ tick: ctx.tick, type: crit ? "crit" : "hit", sourceId: att.id, targetId: tgt.id, amount: dmg, x: tgt.x, y: tgt.y });
   if (tgt.id === "core") ctx.events.push({ tick: ctx.tick, type: "coreHit", sourceId: att.id, amount: dmg });
   checkHealAtHalf(ctx, tgt);
@@ -551,6 +602,7 @@ function applyDamageRaw(ctx: Ctx, tgt: SimEntity, dmg: number, type: AffinityTyp
     // light mitigation for raw typed (dots already balanced; keep simple)
   }
   absorb(tgt, Math.max(1, Math.round(d)));
+  if (tgt.id !== "core" && sourceId && sourceId !== tgt.id) { tgt.threatId = sourceId; tgt.threatTick = ctx.tick; } // retaliate
   ctx.events.push({ tick: ctx.tick, type: "hit", sourceId, targetId: tgt.id, amount: Math.round(d), x: tgt.x, y: tgt.y });
   if (tgt.id === "core") ctx.events.push({ tick: ctx.tick, type: "coreHit", sourceId, amount: Math.round(d) });
   checkHealAtHalf(ctx, tgt);
