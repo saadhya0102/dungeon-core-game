@@ -85,7 +85,8 @@ export class DungeonView {
       antialias: true,
       autoDensity: true,
       sharedTicker: false, // each view drives its own ticker (needed for H2H split-screen)
-      resolution: Math.min(2, window.devicePixelRatio || 1),
+      // H2H runs two canvases side-by-side; render at 1x there to avoid fill-rate lag.
+      resolution: this.manual ? 1 : Math.min(2, window.devicePixelRatio || 1),
     });
     if (this.destroyed) { this.app.destroy(true, { children: true }); return; }
     this.parent.appendChild(this.app.canvas);
@@ -443,7 +444,14 @@ export class DungeonView {
 
   private fxItems: { g: Graphics | Text; life: number; max: number; vx: number; vy: number; sr: number }[] = [];
 
+  private static FX_CAP = 160;
   private addFx(g: Graphics | Text, life: number, vx: number, vy: number, sr = 0) {
+    // Cap concurrent FX so big siege fights don't drown the renderer in
+    // throwaway Graphics/Text (the main source of replay lag).
+    if (this.fxItems.length >= DungeonView.FX_CAP) {
+      const old = this.fxItems.shift();
+      if (old) old.g.destroy();
+    }
     this.fxLayer.addChild(g);
     this.fxItems.push({ g, life, max: life, vx, vy, sr });
   }
@@ -480,10 +488,13 @@ export class DungeonView {
     if (ev.type === "hit" || ev.type === "crit") {
       if (px === undefined || py === undefined) return;
       const crit = ev.type === "crit";
-      const t = new Text({ text: String(ev.amount ?? 0), style: { fontSize: crit ? 16 : 11, fill: crit ? 0xffe066 : 0xffffff, fontWeight: "bold", stroke: { color: 0x000000, width: 3 } } });
-      t.anchor.set(0.5); t.position.set(px + (Math.random() * 10 - 5), py - 14);
-      this.addFx(t, crit ? 50 : 40, 0, -0.6, 0);
-      this.spark(px, py, crit ? 0xffe066 : 0xffffff, crit ? 6 : 3, crit ? 1.7 : 1.1);
+      // Damage-number Text is the most expensive FX; skip it when saturated.
+      if (crit || this.fxItems.length < 90) {
+        const t = new Text({ text: String(ev.amount ?? 0), style: { fontSize: crit ? 16 : 11, fill: crit ? 0xffe066 : 0xffffff, fontWeight: "bold", stroke: { color: 0x000000, width: 3 } } });
+        t.anchor.set(0.5); t.position.set(px + (Math.random() * 10 - 5), py - 14);
+        this.addFx(t, crit ? 50 : 40, 0, -0.6, 0);
+      }
+      this.spark(px, py, crit ? 0xffe066 : 0xffffff, crit ? 4 : 2, crit ? 1.7 : 1.1);
       // Only a direct, LOS-checked attack draws a projectile / attacker lunge.
       // AoE splash, DoT ticks and thorns are not aimed shots and must not fling
       // arrows through walls.
@@ -545,7 +556,8 @@ export class DungeonView {
       p.life += step;
       const t = Math.min(1, p.life / p.max);
       p.g.position.set(lerp2(p.sx, p.tx, t), lerp2(p.sy, p.ty, t));
-      if (p.kind === "arcane") {
+      // arcane trail: only when FX isn't already saturated (avoids flooding)
+      if (p.kind === "arcane" && this.fxItems.length < 120) {
         const tr = new Graphics();
         tr.circle(0, 0, 2).fill({ color: 0x9a7cff, alpha: 0.5 });
         tr.position.set(p.g.x, p.g.y);
