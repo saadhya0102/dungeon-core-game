@@ -14,6 +14,24 @@ import {
   capacityMax, capacityUsed, unlockedUnits,
 } from "./actions";
 import { isPassable } from "./maputil";
+import { resolveWave } from "./resolve";
+import { generateWave } from "./wavegen";
+
+/**
+ * Estimate the highest normal wave this (static) dungeon can survive, by
+ * simulating it against escalating waves until its core falls. This makes the
+ * displayed "wave reached" reflect the dungeon's REAL strength instead of a
+ * made-up number. resolveWave does not mutate the dungeon, so probing is safe.
+ */
+function estimateWaveReached(run: RunState): number {
+  let reached = 0;
+  for (let w = 3; w <= 70; w += 4) {
+    run.wave = w;
+    const tl = resolveWave(run, generateWave(w, run.rngSeedRoot));
+    if (tl.outcome.coreSurvived) reached = w; else break;
+  }
+  return Math.max(1, reached);
+}
 
 function digArena(run: RunState) {
   // Keep bot dungeons fairly CONTAINED (not a giant open field) so the core
@@ -96,13 +114,14 @@ export function buildLadderBot(name: string, seed: number, targetCl: number, fac
   fillUnits(run, faction);
   run.dp = 0;
   const rating = ratingOf(run);
+  const endedAtWave = estimateWaveReached(run);
   return {
     id: `bot_${seed}`,
     uid: `bot_${seed}`,
     name,
     createdAt: 0,
     source: "retire",
-    endedAtWave: targetCl * 4 + 4,
+    endedAtWave,
     rating,
     shareable: false,
     dungeon: { map: run.map, units: run.units, traps: run.traps, inventory: run.inventory, research: run.research, core: run.core },
