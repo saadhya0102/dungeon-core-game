@@ -23,15 +23,18 @@ export function WaveBar() {
   const finishWave = useStore((s) => s.finishWave);
   const timeline = useStore((s) => s.timeline);
   const cursor = useStore((s) => s.cursorTick);
+  const openPanel = useStore((s) => s.openPanel);
   if (!run) return null;
 
   if (phase === "build" || phase === "result") {
     return (
       <div className="bottombar">
-        <button className="primary big" disabled={phase === "result"} onClick={runWave}>Run Wave {run.wave}</button>
-        <span className="small">Playback speed:</span>
+        <button className="primary big wave-launch" disabled={phase === "result" || !!openPanel} onClick={runWave}>Start wave {run.wave}</button>
+        <span className="small speed-label">Replay speed</span>
         <SpeedPicker />
-        <div className="log">{run.units.length} units &middot; {run.traps.length} traps placed. Set your preferred speed before running.</div>
+        <div className="log">{run.units.length || run.traps.length
+          ? `${run.units.length} ${run.units.length === 1 ? "unit" : "units"} · ${run.traps.length} ${run.traps.length === 1 ? "trap" : "traps"}`
+          : "No defenders or traps placed"}</div>
       </div>
     );
   }

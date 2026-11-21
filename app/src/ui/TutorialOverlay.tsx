@@ -162,6 +162,7 @@ function saveSeen(seen: ReadonlySet<string>): void {
 export function TutorialOverlay() {
   const run = useStore((s) => s.run);
   const phase = useStore((s) => s.phase);
+  const openPanel = useStore((s) => s.openPanel);
   const [seen, setSeen] = useState<Set<string>>(loadSeen);
 
   const dismiss = useCallback((id: string) => {
@@ -174,7 +175,7 @@ export function TutorialOverlay() {
     });
   }, []);
 
-  if (!run) return null;
+  if (!run || run.idle || openPanel || run.modifiers.includes("tutorial")) return null;
   if (phase !== "build" && phase !== "result") return null;
   // The guided tutorial owns onboarding until it's completed/skipped.
   try { if (localStorage.getItem("dc_tutorial_done") !== "1") return null; } catch { /* ignore */ }
@@ -182,47 +183,18 @@ export function TutorialOverlay() {
   const active = TIPS.find((t) => !seen.has(t.id) && t.match(run, phase, seen));
   if (!active) return null;
 
-  const isTutorialRun = run.modifiers.includes("tutorial");
-  const emphasize = active.id === "welcome" && isTutorialRun;
-
   return (
-    <div
-      className="panel"
-      role="status"
-      style={{
-        position: "fixed",
-        left: "50%",
-        bottom: 84,
-        transform: "translateX(-50%)",
-        width: 320,
-        maxWidth: "92vw",
-        maxHeight: "none",
-        padding: 14,
-        zIndex: 40,
-        boxShadow: "0 8px 28px #0008",
-        borderColor: emphasize ? "var(--accent)" : undefined,
-      }}
-    >
-      <div
-        className="small"
-        style={{
-          textTransform: "uppercase",
-          letterSpacing: ".6px",
-          color: emphasize ? "var(--accent)" : "var(--muted)",
-        }}
-      >
-        {emphasize ? "Tutorial" : "Tip"}
+    <aside className="context-tip" aria-label="Dungeon tip">
+      <div><strong>{active.title}</strong><p>{active.body}</p></div>
+      <div className="guided-actions">
+        <button onClick={() => {
+          const all = new Set(TIPS.map((tip) => tip.id));
+          saveSeen(all);
+          setSeen(all);
+        }}>Hide tips</button>
+        <button onClick={() => dismiss(active.id)}>Got it</button>
       </div>
-      <h3 style={{ margin: "2px 0 6px" }}>{active.title}</h3>
-      <p className="hint" style={{ margin: "0 0 12px" }}>
-        {active.body}
-      </p>
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button className="primary" onClick={() => dismiss(active.id)}>
-          Got it
-        </button>
-      </div>
-    </div>
+    </aside>
   );
 }
 

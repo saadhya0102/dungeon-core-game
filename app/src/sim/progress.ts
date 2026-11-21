@@ -4,6 +4,7 @@
 import type { RunState, Timeline } from "./types";
 import { coreLevelRow, wardForCl } from "./config";
 import { CLASS_BY_ID } from "./content/enemies";
+import { sizeCap } from "./actions";
 
 export interface WaveApplyResult {
   died: boolean;
@@ -99,5 +100,5 @@ export function applyWaveResult(run: RunState, tl: Timeline): WaveApplyResult {
 
 export function capForRun(run: RunState): { sizeCap: number; maxUnitTier: number } {
   const row = coreLevelRow(run.core.level);
-  return { sizeCap: row.sizeCap, maxUnitTier: row.maxUnitTier };
+  return { sizeCap: sizeCap(run), maxUnitTier: row.maxUnitTier };
 }

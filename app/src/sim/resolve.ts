@@ -2,14 +2,14 @@
 // Deterministic combat resolution (docs/10). Pure: (run, seed) -> Timeline.
 // ============================================================================
 import type {
-  RunState, WaveDef, Timeline, SimEntity, SimEvent, StatusSpec, StatusEffect,
+  RunState, WaveDef, Timeline, SimEntity, SimEvent, StatusSpec, StatusEffect, AbilityEffectKind,
   GearItem, AffinityType, Tier, Frame, EntityMeta,
 } from "./types";
 import { FLAG_FROZEN, FLAG_BERSERK, FLAG_INVIS } from "./types";
 import { CONFIG } from "./config";
 import { makePRNG, hashSeed } from "./rng";
 import type { PRNG } from "./rng";
-import { generateWave } from "./wavegen";
+import { waveForRun } from "./kingdom";
 import {
   buildDungeonEntities, buildInvaderEntities, computeResearchMods,
 } from "./combat";
@@ -45,8 +45,8 @@ interface Ctx {
 const TICKS_PER_SEC = CONFIG.TICKS_PER_SEC;
 const DT = 1 / TICKS_PER_SEC;
 
-export function resolveWave(run: RunState, waveOverride?: WaveDef): Timeline {
-  const wave = waveOverride ?? generateWave(run.wave, run.rngSeedRoot);
+export function resolveWave(run: RunState, waveOverride?: WaveDef, options?: { captureFrames?: boolean; tickLimit?: number }): Timeline {
+  const wave = waveOverride ?? waveForRun(run);
   const seed = hashSeed(run.rngSeedRoot, run.wave, 0x5151);
   const rng = makePRNG(seed);
   const mods = computeResearchMods(run);
@@ -81,8 +81,16 @@ export function resolveWave(run: RunState, waveOverride?: WaveDef): Timeline {
     casualties: new Set(),
   };
 
-  // Wave-start abilities (auras, summons, shields)
-  applyWaveStart(ctx);
+  // Delayed monsters activate their entrance abilities when they reach the board.
+  const delayed = new Map<number, SimEntity[]>();
+  for (const entity of invaders) {
+    const tick = entity.spawnTick ?? 0;
+    if (tick <= 0) continue;
+    const group = delayed.get(tick) ?? [];
+    group.push(entity);
+    delayed.set(tick, group);
+  }
+  applyWaveStart(ctx, [...dungeon, ...invaders.filter((entity) => isSpawned(entity, 0))]);
 
   ctx.events.push({ tick: 0, type: "waveStart", data: { invaders: invaders.length, group: wave.groupType } });
   for (const e of dungeon) {
@@ -94,11 +102,13 @@ export function resolveWave(run: RunState, waveOverride?: WaveDef): Timeline {
   }
 
   const maxSpawnTick = invaders.reduce((m, e) => Math.max(m, e.spawnTick ?? 0), 0);
-  const maxTicks = CONFIG.MAX_TICKS_BASE + invaders.length * 20 + maxSpawnTick;
+  const maxTicks = options?.tickLimit ?? (CONFIG.MAX_TICKS_BASE + invaders.length * 20 + maxSpawnTick);
   let coreSurvived = true;
 
   for (let tick = 1; tick <= maxTicks; tick++) {
     ctx.tick = tick;
+    const arrivals = delayed.get(tick);
+    if (arrivals) applyWaveStart(ctx, arrivals);
     processStatuses(ctx);
     processRogueReveal(ctx);
     if (ctx.flowDirty) { ctx.flow = buildFlowField(run, traps); ctx.flowDirty = false; }
@@ -112,7 +122,7 @@ export function resolveWave(run: RunState, waveOverride?: WaveDef): Timeline {
       else dungeonAct(ctx, e);
     }
     processHealers(ctx);
-    snapshotFrame(ctx);
+    if (options?.captureFrames !== false) snapshotFrame(ctx);
 
     if (core.hp <= 0) { coreSurvived = false; break; }
     if (invaders.every((e) => e.state === "dead")) break;
@@ -125,7 +135,7 @@ export function resolveWave(run: RunState, waveOverride?: WaveDef): Timeline {
 
   const meta: EntityMeta[] = [core, ...dungeon, ...invaders].map((e) => ({
     id: e.id, side: e.side, defId: e.defId, name: e.name, tier: e.tier,
-    isUnique: e.isUnique ?? false, family: e.family, archetype: e.archetype,
+    isUnique: e.isUnique ?? false, uniqueId: e.uniqueId, family: e.family, archetype: e.archetype,
   }));
 
   return {
@@ -137,7 +147,7 @@ export function resolveWave(run: RunState, waveOverride?: WaveDef): Timeline {
       coreHpRemaining: Math.max(0, core.hp),
       waveCleared: coreSurvived,
     },
-    events: ctx.events,
+    events: ctx.events.sort((a, b) => a.tick - b.tick),
     frames: ctx.frames,
     meta,
     coreHpStart: run.core.hp + run.core.ward,
@@ -204,16 +214,22 @@ function attackInterval(e: SimEntity): number {
   return Math.max(2, Math.round(TICKS_PER_SEC * CONFIG.BASE_ATTACK_INTERVAL / Math.max(0.2, spd)));
 }
 
+function abilityCue(ctx: Ctx, caster: SimEntity, effect: AbilityEffectKind, at = caster, radius?: number) {
+  ctx.events.push({ tick: ctx.tick, type: "ability", sourceId: caster.id, targetId: at.id, x: at.x, y: at.y,
+    data: { effect, radius } });
+}
+
 // --- Wave start: auras, summons, shields ---
-function applyWaveStart(ctx: Ctx) {
-  for (const e of [...ctx.dungeon, ...ctx.invaders]) {
+function applyWaveStart(ctx: Ctx, entities: SimEntity[]) {
+  for (const e of entities) {
     for (const ab of e.abilities) {
       if (ab.trigger !== "onWaveStart" && ab.trigger !== "passive") continue;
       if (ab.effect === "auraBuff" || ab.effect === "partyBuff") {
         const allies = e.side === "dungeon" ? ctx.dungeon : ctx.invaders;
         const radius = ab.radius ?? 4;
+        abilityCue(ctx, e, ab.effect, e, radius);
         for (const a of allies) {
-          if (a.id === e.id) continue;
+          if (a.id === e.id || a.state === "dead" || !isSpawned(a, ctx.tick)) continue;
           if (dist(a, e) <= radius) {
             for (const [stat, pct] of Object.entries(ab.params ?? {})) {
               (a.stats as Record<string, number>)[stat] *= 1 + (pct as number);
@@ -222,8 +238,10 @@ function applyWaveStart(ctx: Ctx) {
         }
       } else if (ab.effect === "shieldOnWaveStart") {
         e.shield += Math.round(e.maxHp * (ab.params?.pct ?? 0.15));
+        abilityCue(ctx, e, ab.effect);
       } else if (ab.effect === "summon" || ab.effect === "petSummon") {
         const count = Math.round(ab.params?.count ?? 1);
+        abilityCue(ctx, e, ab.effect);
         for (let i = 0; i < count; i++) spawnAdd(ctx, e);
       }
     }
@@ -236,7 +254,7 @@ function spawnAdd(ctx: Ctx, parent: SimEntity) {
     side: parent.side, defId: parent.side === "dungeon" ? "summon" : "summon",
     name: "Summoned", tier: 1, x: parent.x + ctx.rng.range(-0.5, 0.5), y: parent.y + ctx.rng.range(-0.5, 0.5),
     homeX: Math.round(parent.x), homeY: Math.round(parent.y),
-    hp: Math.round(parent.maxHp * 0.25), maxHp: Math.round(parent.maxHp * 0.25), shield: 0,
+    hp: Math.round(parent.maxHp * 0.25), maxHp: Math.round(parent.maxHp * 0.25), shield: 0, spawnTick: ctx.tick,
     stats: { ...parent.stats, hp: parent.maxHp * 0.25, phys: parent.stats.phys * 0.4, mag: parent.stats.mag * 0.4, rng: parent.stats.rng * 0.4, moveSpeed: Math.max(1, parent.stats.moveSpeed) },
     affinities: parent.affinities, abilities: [], primaryDamageType: parent.primaryDamageType,
     state: "idle", attackCdTicks: 0, statuses: [], revealRadius: 0, threatValue: 0.5,
@@ -274,7 +292,7 @@ function addStatus(target: SimEntity, spec: StatusSpec, sourceId: string) {
 // --- Rogue reveal of traps (docs/08, 09) ---
 function processRogueReveal(ctx: Ctx) {
   for (const inv of ctx.invaders) {
-    if (inv.state === "dead" || inv.revealRadius <= 0) continue;
+    if (inv.state === "dead" || inv.revealRadius <= 0 || !isSpawned(inv, ctx.tick)) continue;
     for (const t of ctx.traps) {
       if (t.revealed || t.depleted) continue;
       if (Math.hypot(inv.x - t.x, inv.y - t.y) <= inv.revealRadius) {
@@ -478,7 +496,7 @@ function processHealers(ctx: Ctx) {
     const radius = heal.radius ?? 5;
     let lowest: SimEntity | null = null;
     for (const a of ctx.invaders) {
-      if (a.state === "dead" || a.hp >= a.maxHp) continue;
+      if (a.state === "dead" || a.hp >= a.maxHp || !isSpawned(a, ctx.tick)) continue;
       if (dist(a, e) > radius) continue;
       if (!lowest || a.hp / a.maxHp < lowest.hp / lowest.maxHp) lowest = a;
     }
@@ -486,6 +504,7 @@ function processHealers(ctx: Ctx) {
       const amt = Math.round(lowest.maxHp * (heal.params?.amount ?? 0.12));
       lowest.hp = Math.min(lowest.maxHp, lowest.hp + amt);
       ctx.events.push({ tick: ctx.tick, type: "heal", sourceId: e.id, targetId: lowest.id, amount: amt });
+      abilityCue(ctx, e, "healAlly", lowest);
     }
   }
 }
@@ -521,13 +540,25 @@ function resolveAttack(ctx: Ctx, att: SimEntity, tgt: SimEntity) {
   if (ctx.rng.next() < att.stats.crit) { dmg *= att.stats.critMult; crit = true; }
 
   // berserk: once below half HP, fights harder (faster + stronger)
-  if (!att.berserk && att.hp < att.maxHp * 0.5 && att.abilities.some((a) => a.effect === "berserk")) att.berserk = true;
+  if (!att.berserk && att.hp < att.maxHp * 0.5 && att.abilities.some((a) => a.effect === "berserk")) {
+    att.berserk = true;
+    abilityCue(ctx, att, "berserk");
+  }
   if (att.berserk) dmg *= 1.4;
   // first strike: a big bonus on this entity's very first hit
-  if (!att.firstAttackDone && att.abilities.some((a) => a.effect === "firstStrike")) { dmg *= 1.7; att.firstAttackDone = true; }
+  const firstStrike = att.abilities.find((ability) => ability.effect === "firstStrike");
+  if (!att.firstAttackDone && firstStrike) {
+    dmg *= firstStrike.params?.mult ?? 1.7;
+    att.firstAttackDone = true;
+    abilityCue(ctx, att, "firstStrike", tgt);
+  }
 
   // execute bonus
-  if (att.abilities.some((a) => a.effect === "executeLowHp") && tgt.hp / tgt.maxHp < 0.25) dmg *= 1.6;
+  const execute = att.abilities.find((ability) => ability.effect === "executeLowHp");
+  if (execute && tgt.hp / tgt.maxHp < 0.25) {
+    dmg *= execute.params?.mult ?? 1.6;
+    abilityCue(ctx, att, "executeLowHp", tgt);
+  }
 
   dmg = mitigate(dmg, type, att, tgt);
   if (ctx.rng.next() < tgt.stats.block) dmg *= 1 - CONFIG.BLOCK_REDUCTION;
@@ -549,12 +580,23 @@ function resolveAttack(ctx: Ctx, att: SimEntity, tgt: SimEntity) {
     else if (ab.effect === "bleedOnHit") addStatus(tgt, { kind: "bleed", magnitude: ab.params?.dps ?? 7, durationTicks: ab.params?.dur ?? 30 }, att.id);
     else if (ab.effect === "freezeOnHit") addStatus(tgt, { kind: "freeze", magnitude: 1, durationTicks: ab.params?.dur ?? 12 }, att.id);
     else if (ab.effect === "confuse") addStatus(tgt, { kind: "confuse", magnitude: 1, durationTicks: 15 }, att.id);
-    else if (ab.effect === "cleave") cleave(ctx, att, tgt, dmg * 0.5, bigAoe ? 2.4 : 1.6);
-    else if (ab.effect === "splash") splash(ctx, att, tgt, dmg * (bigAoe ? 0.6 : 0.5), bigAoe ? 2.6 : 1.6);
+    else if (ab.effect === "cleave") {
+      const radius = ab.radius ?? (bigAoe ? 2.4 : 1.6);
+      cleave(ctx, att, tgt, dmg * 0.5, radius);
+      abilityCue(ctx, att, ab.effect, tgt, radius);
+      continue;
+    } else if (ab.effect === "splash") {
+      const radius = ab.radius ?? (bigAoe ? 2.6 : 1.6);
+      splash(ctx, att, tgt, dmg * (ab.params?.pct ?? (bigAoe ? 0.6 : 0.5)), radius);
+      abilityCue(ctx, att, ab.effect, tgt, radius);
+      continue;
+    } else continue;
+    abilityCue(ctx, att, ab.effect, tgt);
   }
   // thorns on target
   const thorns = tgt.abilities.find((a) => a.effect === "thorns");
   if (thorns && att.state !== "dead") {
+    abilityCue(ctx, tgt, "thorns", att);
     applyDamageRaw(ctx, att, Math.round(dmg * (thorns.params?.pct ?? 0.2)), "true", tgt.id);
   }
 }
@@ -576,7 +618,7 @@ function mitigate(dmg: number, type: AffinityType, att: SimEntity, tgt: SimEntit
 function cleave(ctx: Ctx, att: SimEntity, primary: SimEntity, dmg: number, radius = 1.6) {
   const pool = att.side === "dungeon" ? ctx.invaders : ctx.dungeon;
   for (const o of pool) {
-    if (o.id === primary.id || o.state === "dead") continue;
+    if (o.id === primary.id || o.state === "dead" || !isSpawned(o, ctx.tick)) continue;
     if (dist(att, o) <= radius) applyDamageRaw(ctx, o, Math.round(dmg), att.primaryDamageType, att.id);
   }
 }
@@ -584,7 +626,7 @@ function cleave(ctx: Ctx, att: SimEntity, primary: SimEntity, dmg: number, radiu
 function splash(ctx: Ctx, att: SimEntity, center: SimEntity, dmg: number, radius = 1.6) {
   const pool = att.side === "dungeon" ? ctx.invaders : ctx.dungeon;
   for (const o of pool) {
-    if (o.id === center.id || o.state === "dead") continue;
+    if (o.id === center.id || o.state === "dead" || !isSpawned(o, ctx.tick)) continue;
     if (dist(center, o) <= radius) applyDamageRaw(ctx, o, Math.round(dmg), att.primaryDamageType, att.id);
   }
 }
@@ -599,6 +641,7 @@ function checkHealAtHalf(ctx: Ctx, e: SimEntity) {
   const amt = Math.round(e.maxHp * (ab.params?.pct ?? 0.3));
   e.hp = Math.min(e.maxHp, e.hp + amt);
   ctx.events.push({ tick: ctx.tick, type: "heal", sourceId: e.id, targetId: e.id, amount: amt });
+  abilityCue(ctx, e, "healAtHalf");
 }
 
 function applyDamageResolved(ctx: Ctx, att: SimEntity, tgt: SimEntity, dmg: number, crit: boolean) {
@@ -648,14 +691,14 @@ function killEntity(ctx: Ctx, e: SimEntity, killer?: SimEntity) {
     const dmg = Math.round(e.maxHp * (boom.params?.pct ?? 0.4));
     ctx.events.push({ tick: ctx.tick, type: "trapTrigger", x: e.x, y: e.y, data: { explode: true } });
     for (const o of pool) {
-      if (o.state === "dead") continue;
+      if (o.state === "dead" || !isSpawned(o, ctx.tick)) continue;
       if (dist(e, o) <= radius) applyDamageRaw(ctx, o, dmg, "fire", e.id);
     }
   }
   if (e.side === "invader" && e.defId !== "summon") {
     // reward + drops (defeated adventurer)
     const cls = CLASS_BY_ID[e.defId];
-    const ps = cls ? powerScore(cls.stats) * (e.isUnique ? 1.6 : 1) : 100;
+    const ps = cls ? powerScore(cls.stats) * (e.isUnique ? 1.6 : 1) : powerScore(e.stats);
     ctx.reward.dp += Math.round(dpKill(ps, e.isUnique ?? false) * ctx.dpKillMult);
     ctx.reward.killCount++;
     const drop = rollDrop(ctx.rng, e.tier as Tier, e.isUnique ?? false);
@@ -695,7 +738,7 @@ function triggerTrapsAt(ctx: Ctx, e: SimEntity) {
 function fireTrap(ctx: Ctx, t: TrapRuntime, def: typeof TRAP_BY_ID[string]) {
   ctx.events.push({ tick: ctx.tick, type: "trapTrigger", x: t.x, y: t.y, data: { defId: t.defId } });
   const r = def.radius ?? 0.6;
-  const targets = ctx.invaders.filter((e) => e.state !== "dead" && Math.hypot(e.x - t.x, e.y - t.y) <= Math.max(0.7, r));
+  const targets = ctx.invaders.filter((e) => e.state !== "dead" && isSpawned(e, ctx.tick) && Math.hypot(e.x - t.x, e.y - t.y) <= Math.max(0.7, r));
   for (const tgt of targets) {
     if (def.effect.damage) {
       const type = (def.effect.damageType ?? "true") as AffinityType | "true";

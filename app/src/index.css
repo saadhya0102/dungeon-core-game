@@ -3,3 +3,8 @@
   font-family: "Segoe UI", system-ui, sans-serif;
   color-scheme: dark;
 }
+
+html, body { margin: 0; min-height: 100%; background: #101318; color: #f2ead9; }
+.boot-screen { display: grid; min-height: 100vh; align-content: center; justify-items: center; padding: 24px; box-sizing: border-box; gap: 16px; }
+.boot-screen h1 { margin: 0; font: 700 clamp(22px, 5vw, 42px) Georgia, serif; }
+.boot-screen button { background: #a17546; color: #160f0c; border: 1px solid #e0ba7d; border-radius: 3px; padding: 9px 16px; font: inherit; cursor: pointer; }

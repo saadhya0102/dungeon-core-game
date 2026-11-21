@@ -9,6 +9,7 @@ export * from "./economy";
 export * from "./maputil";
 export * from "./wavegen";
 export * from "./factory";
+export * from "./kingdom";
 export * from "./content";
 export { resolveWave } from "./resolve";
 export {
@@ -23,8 +24,8 @@ export {
 } from "./combat";
 export type { ResearchMods } from "./combat";
 export {
-  capacityMax, capacityUsed, unlockedUnits, maxTraps,
-  digTile, collapseTile, placeUnit, moveUnit, sellUnit,
+  capacityMax, capacityUsed, unlockedUnits, maxTraps, recruitPrice,
+  digTile, collapseTile, buyRoom, roomCost, tileCost, sizeCap, placeUnit, moveUnit, sellUnit,
   placeTrap, sellTrap, moveTrap, moveCore, equipGear, unequipGear, salvageGear,
   buyGear, rerollGearShop, generateShopStock, buyResearch, upgradeCore, moveEntrance,
 } from "./actions";

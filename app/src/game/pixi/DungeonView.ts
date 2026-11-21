@@ -1,15 +1,15 @@
 // ============================================================================
-// PixiJS dungeon renderer (docs/14, 17). Placeholder art (shapes + labels).
+// PixiJS dungeon renderer (docs/14, 17).
 // Renders the build scene and plays back wave timelines.
 // ============================================================================
 import { Application, Container, Graphics, Text } from "pixi.js";
 import type { FederatedPointerEvent } from "pixi.js";
 import type { RunState, Timeline, EntityMeta, Frame, Archetype } from "../../sim/types";
-import { FAMILY_COLORS } from "../../sim/types";
 import { UNIT_BY_ID, UNIT_DMG } from "../../sim/content/units";
 import { TRAP_BY_ID } from "../../sim/content/traps";
 import { AnimSprite } from "./sprites";
 import type { WeaponKind } from "./sprites";
+import { abilityVisual, playsCastPose } from "../art/abilityVisuals";
 
 export const TILE = 38;
 
@@ -19,7 +19,6 @@ type ClickHandler = (x: number, y: number) => void;
 type HoverHandler = (info: HoverInfo | null) => void;
 type DragDigHandler = (x0: number, y0: number, x1: number, y1: number) => void;
 
-const ARCH_COLOR: Record<string, number> = { warrior: 0xd25a4a, archer: 0x4aa85a, mage: 0x4a78d2, rogue: 0x9a5ad2 };
 function weaponForArchetype(a?: Archetype): WeaponKind {
   if (a === "archer") return "ranged";
   if (a === "mage") return "arcane";
@@ -55,7 +54,11 @@ export class DungeonView {
   onClick: ClickHandler = () => {};
   onHover: HoverHandler = () => {};
   onDragDig: DragDigHandler = () => {};
+  onCancel: () => void = () => {};
+  onError: (error: unknown) => void = (error) => console.error(error);
   toolIsDig = false;
+  toolIsRoom = false;
+  checkPlacement: ((x: number, y: number) => string | null) | null = null;
   selectionId: string | null = null;
 
   // replay state
@@ -68,6 +71,7 @@ export class DungeonView {
   private getSpeed: () => number = () => 1;
   private onReplayEnd: () => void = () => {};
   private cursor = 0;
+  private endHold = 0;
   private lastEventIdx = 0;
   private replaying = false;
   private onCursor: (t: number) => void = () => {};
@@ -81,8 +85,9 @@ export class DungeonView {
   async init() {
     if (this.inited) return;
     await this.app.init({
-      background: 0x0e0f1a,
-      antialias: true,
+      preference: ["webgl", "canvas"],
+      backgroundAlpha: 0,
+      antialias: false,
       autoDensity: true,
       sharedTicker: false, // each view drives its own ticker (needed for H2H split-screen)
       // H2H runs two canvases side-by-side; render at 1x there to avoid fill-rate lag.
@@ -90,6 +95,7 @@ export class DungeonView {
     });
     if (this.destroyed) { this.app.destroy(true, { children: true }); return; }
     this.parent.appendChild(this.app.canvas);
+    this.app.canvas.addEventListener("webglcontextlost", () => this.onError(new Error("Graphics context lost")));
     this.world.addChild(this.tileLayer, this.rangeLayer, this.trapLayer, this.entityLayer, this.fxLayer, this.overlayLayer);
     this.app.stage.addChild(this.world);
     this.app.stage.eventMode = "static";
@@ -99,7 +105,10 @@ export class DungeonView {
       // Externally driven (e.g. H2H split-screen): owner calls frameStep() + render.
       this.app.ticker.stop();
     } else {
-      this.app.ticker.add(() => this.tick());
+      this.app.ticker.add(() => {
+        try { this.tick(); }
+        catch (error) { this.app.ticker.stop(); this.onError(error); }
+      });
       this.app.ticker.start();
     }
     this.inited = true;
@@ -135,6 +144,7 @@ export class DungeonView {
   private bindEvents() {
     const stage = this.app.stage;
     stage.on("pointerdown", (e: FederatedPointerEvent) => {
+      if (e.button !== 0) return;
       const t = this.screenToTile(e.global.x, e.global.y);
       if (this.toolIsDig) { this.digStart = t; return; }
       this.dragging = true;
@@ -159,9 +169,11 @@ export class DungeonView {
     const endDrag = (e: FederatedPointerEvent) => {
       const t = this.screenToTile(e.global.x, e.global.y);
       if (this.toolIsDig && this.digStart) {
-        if (this.digStart.x === t.x && this.digStart.y === t.y) this.onClick(t.x, t.y);
-        else this.onDragDig(this.digStart.x, this.digStart.y, t.x, t.y);
+        const start = this.digStart;
         this.digStart = null;
+        this.drawHoverOverlay();
+        if (start.x === t.x && start.y === t.y) this.onClick(t.x, t.y);
+        else this.onDragDig(start.x, start.y, t.x, t.y);
         return;
       }
       if (this.dragging && !this.dragStart.moved) this.onClick(t.x, t.y);
@@ -169,21 +181,34 @@ export class DungeonView {
     };
     stage.on("pointerup", endDrag);
     stage.on("pointerupoutside", () => { this.dragging = false; this.digStart = null; });
+    stage.on("pointerleave", () => {
+      if (this.dragging || this.digStart) return;
+      this.hoverTile = null;
+      this.onHover(null);
+      this.drawHoverOverlay();
+    });
+    this.app.canvas.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      this.onCancel();
+    });
     this.app.canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
       this.userMoved = true; // user interacted; stop auto-centering
       const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-      const nz = Math.max(0.35, Math.min(2.5, this.zoom * factor));
       // zoom toward pointer
       const rect = this.app.canvas.getBoundingClientRect();
       const px = e.clientX - rect.left, py = e.clientY - rect.top;
-      const wx = (px - this.camX) / this.zoom;
-      const wy = (py - this.camY) / this.zoom;
-      this.zoom = nz;
-      this.camX = px - wx * this.zoom;
-      this.camY = py - wy * this.zoom;
-      this.applyCam();
+      this.zoomBy(factor, px, py);
     }, { passive: false });
+  }
+
+  zoomBy(factor: number, px = this.parent.clientWidth / 2, py = this.parent.clientHeight / 2) {
+    this.userMoved = true;
+    const wx = (px - this.camX) / this.zoom, wy = (py - this.camY) / this.zoom;
+    this.zoom = Math.max(0.35, Math.min(2.5, this.zoom * factor));
+    this.camX = px - wx * this.zoom;
+    this.camY = py - wy * this.zoom;
+    this.applyCam();
   }
 
   private applyCam() {
@@ -203,6 +228,18 @@ export class DungeonView {
     this.tryCenter();
   }
 
+  fitDungeon(run: RunState) {
+    const { x, y } = run.map.core;
+    let radius = 2;
+    for (const tile of Object.keys(run.map.tiles)) {
+      const [tx, ty] = tile.split(",").map(Number);
+      radius = Math.max(radius, Math.abs(tx - x), Math.abs(ty - y));
+    }
+    const view = Math.min(this.parent.clientWidth * 0.78, this.parent.clientHeight * 0.69);
+    this.zoom = Math.max(0.45, Math.min(1.65, view / ((radius * 2 + 1) * TILE)));
+    this.centerOn(x, y);
+  }
+
   /** Keep the target centered (until the user pans/zooms) once the canvas has a real size. */
   private tryCenter() {
     if (this.userMoved || !this.centerTarget || !this.inited) return;
@@ -219,7 +256,7 @@ export class DungeonView {
     this.replaying = false;
     this.timeline = null;
     // Clear any leftover combat visuals/state from a previous wave.
-    this.fxLayer.removeChildren();
+    for (const child of this.fxLayer.removeChildren()) child.destroy({ children: true });
     this.fxItems = [];
     this.projectiles = [];
     this.spriteById.clear();
@@ -231,29 +268,34 @@ export class DungeonView {
   }
 
   private drawTiles(run: RunState) {
-    this.tileLayer.removeChildren();
+    for (const child of this.tileLayer.removeChildren()) child.destroy({ children: true });
     const g = new Graphics();
     for (const [k, t] of Object.entries(run.map.tiles)) {
       const [x, y] = k.split(",").map(Number);
       const px = x * TILE - TILE / 2, py = y * TILE - TILE / 2;
-      let color = 0x2a2c44;
-      if (t.state === "floor") color = 0x33365a;
-      else if (t.state === "entrance") color = 0x3a5f8a;
-      else if (t.state === "core") color = 0x6a4fb0;
+      const variant = Math.abs((x * 31) ^ (y * 23)) % 4;
+      let color = 0x171c24;
+      if (t.state === "floor") color = [0x303942, 0x343d46, 0x353d43, 0x303c3d][variant];
+      else if (t.state === "entrance") color = 0x34526a;
+      else if (t.state === "core") color = 0x534962;
       g.rect(px + 1, py + 1, TILE - 2, TILE - 2).fill(color);
+      g.rect(px + 2, py + TILE - 6, TILE - 4, 4).fill({ color: 0x141b24, alpha: 0.7 });
+      g.rect(px + 3, py + 3, TILE - 6, 2).fill({ color: 0x96a9a2, alpha: 0.22 });
+      if (t.state === "floor") {
+        g.rect(px + 7 + variant * 5, py + 10, 7, 2).fill({ color: 0x93aa80, alpha: 0.2 });
+        g.rect(px + 11, py + 23 + variant * 2, 12, 2).fill({ color: 0x171c24, alpha: 0.42 });
+      }
     }
     this.tileLayer.addChild(g);
     // core & entrance markers
     const cm = new Graphics();
-    const c = run.map.core;
-    cm.poly([c.x * TILE, c.y * TILE - 12, c.x * TILE + 12, c.y * TILE, c.x * TILE, c.y * TILE + 12, c.x * TILE - 12, c.y * TILE]).fill(0xb98cff).stroke({ width: 2, color: 0xe0c9ff });
     const e = run.map.entrance;
     cm.circle(e.x * TILE, e.y * TILE, 13).stroke({ width: 3, color: 0x7fd0ff });
     this.tileLayer.addChild(cm);
   }
 
   private drawTraps(run: RunState) {
-    this.trapLayer.removeChildren();
+    for (const child of this.trapLayer.removeChildren()) child.destroy({ children: true });
     for (const tr of run.traps) {
       const def = TRAP_BY_ID[tr.defId];
       const cont = new Container();
@@ -269,19 +311,19 @@ export class DungeonView {
   }
 
   private drawBuildUnits(run: RunState) {
-    this.entityLayer.removeChildren();
+    for (const child of this.entityLayer.removeChildren()) child.destroy({ children: true });
     this.buildSprites = [];
+    const core = new AnimSprite({ id: "core", tier: 1, weapon: "melee" });
+    core.root.position.set(run.map.core.x * TILE, run.map.core.y * TILE);
+    this.entityLayer.addChild(core.root);
+    this.buildSprites.push(core);
     for (const u of run.units) {
       const def = UNIT_BY_ID[u.defId];
       if (!def) continue;
       const anim = new AnimSprite({
-        kind: "unit",
-        primaryColor: FAMILY_COLORS[def.family],
+        id: u.defId,
         tier: def.tier,
-        unique: false,
         weapon: (UNIT_DMG[u.defId] ?? "melee") as WeaponKind,
-        side: "dungeon",
-        family: def.family,
       });
       anim.root.position.set(u.x * TILE, u.y * TILE);
       if (u.id === this.selectionId) {
@@ -295,11 +337,20 @@ export class DungeonView {
   }
 
   private drawHoverOverlay() {
-    this.overlayLayer.removeChildren();
+    for (const child of this.overlayLayer.removeChildren()) child.destroy({ children: true });
     if (!this.hoverTile || this.replaying) return;
     const g = new Graphics();
     const { x, y } = this.hoverTile;
-    g.rect(x * TILE - TILE / 2, y * TILE - TILE / 2, TILE, TILE).stroke({ width: 2, color: 0xffffff, alpha: 0.5 });
+    const range = this.toolIsRoom ? 2 : 0;
+    const minX = this.digStart ? Math.min(this.digStart.x, x) : x - range;
+    const minY = this.digStart ? Math.min(this.digStart.y, y) : y - range;
+    const maxX = this.digStart ? Math.max(this.digStart.x, x) : x + range;
+    const maxY = this.digStart ? Math.max(this.digStart.y, y) : y + range;
+    const brush = this.digStart && (x !== this.digStart.x || y !== this.digStart.y);
+    const color = this.checkPlacement ? !brush && this.checkPlacement(x, y) ? 0xeb8b79 : 0xa6d29b : 0xf2d6a1;
+    const outline = g.rect((minX - 0.5) * TILE, (minY - 0.5) * TILE, (maxX - minX + 1) * TILE, (maxY - minY + 1) * TILE);
+    if (this.checkPlacement) outline.fill({ color, alpha: 0.23 });
+    outline.stroke({ width: 2, color, alpha: 0.9 });
     this.overlayLayer.addChild(g);
   }
 
@@ -308,15 +359,16 @@ export class DungeonView {
     this.timeline = tl;
     this.replaying = true;
     this.cursor = 0;
+    this.endHold = 0;
     this.lastEventIdx = 0;
     this.getSpeed = getSpeed;
     this.onReplayEnd = onEnd;
     this.onCursor = onCursor;
     this.metaById.clear();
     for (const m of tl.meta) this.metaById.set(m.id, m);
-    this.entityLayer.removeChildren();
-    this.fxLayer.removeChildren();
-    this.overlayLayer.removeChildren();
+    for (const child of this.entityLayer.removeChildren()) child.destroy({ children: true });
+    for (const child of this.fxLayer.removeChildren()) child.destroy({ children: true });
+    for (const child of this.overlayLayer.removeChildren()) child.destroy({ children: true });
     this.spriteById.clear();
     this.buildSprites = [];
     this.lastPos.clear();
@@ -332,8 +384,8 @@ export class DungeonView {
    */
   frameStep(dtMs: number) {
     if (!this.inited || this.destroyed) return;
-    this.tick(dtMs);
-    try { this.app.renderer.render(this.app.stage); } catch { /* renderer torn down */ }
+    try { this.tick(dtMs); this.app.renderer.render(this.app.stage); }
+    catch (error) { this.onError(error); }
   }
 
   private tick(dtMsArg?: number) {
@@ -350,11 +402,11 @@ export class DungeonView {
     const ended = this.cursor >= tl.durationTicks;
     if (ended) this.cursor = tl.durationTicks;
 
+    this.renderFrameAt(this.cursor);
     while (this.lastEventIdx < tl.events.length && tl.events[this.lastEventIdx].tick <= this.cursor) {
       this.handleFxEvent(tl.events[this.lastEventIdx]);
       this.lastEventIdx++;
     }
-    this.renderFrameAt(this.cursor);
     this.onCursor(this.cursor);
 
     const dtAnim = dtReal * Math.max(0.0001, speed);
@@ -364,7 +416,10 @@ export class DungeonView {
     }
     this.updateFx((dtMs / 16.6667) * Math.max(1, speed));
 
-    if (ended) { this.replaying = false; this.onReplayEnd(); }
+    if (ended && speed > 0) {
+      this.endHold += dtReal;
+      if (this.endHold >= Math.max(0.22, 0.55 / speed)) { this.replaying = false; this.onReplayEnd(); }
+    }
   }
 
   private renderFrameAt(cursor: number) {
@@ -382,6 +437,7 @@ export class DungeonView {
       let entry = this.spriteById.get(e.id);
       if (!entry) {
         const anim = this.buildReplaySprite(e.id);
+        anim.spawn();
         const hpbar = new Graphics();
         anim.root.addChild(hpbar);
         entry = { anim, hpbar };
@@ -408,29 +464,13 @@ export class DungeonView {
 
   private buildReplaySprite(id: string): AnimSprite {
     const meta = this.metaById.get(id);
-    if (id === "core") {
-      return new AnimSprite({ kind: "core", primaryColor: 0xb98cff, tier: 1, weapon: "melee", side: "dungeon" });
-    }
-    if (meta?.side === "invader") {
-      return new AnimSprite({
-        kind: "enemy",
-        primaryColor: ARCH_COLOR[meta.archetype ?? "warrior"] ?? 0xe06666,
-        tier: meta.tier,
-        unique: meta.isUnique,
-        weapon: weaponForArchetype(meta.archetype),
-        side: "invader",
-        archetype: meta.archetype,
-      });
-    }
-    const color = meta?.family ? FAMILY_COLORS[meta.family] : 0x66cc88;
-    const weapon = (meta && UNIT_DMG[meta.defId]) ? (UNIT_DMG[meta.defId] as WeaponKind) : "melee";
+    const defId = meta?.defId ?? (id === "core" ? "core" : "summon");
     return new AnimSprite({
-      kind: meta?.defId === "summon" ? "summon" : "unit",
-      primaryColor: color,
+      id: meta?.uniqueId ?? defId,
       tier: meta?.tier ?? 1,
-      weapon,
-      side: "dungeon",
-      family: meta?.family,
+      weapon: UNIT_DMG[defId] ?? weaponForArchetype(meta?.archetype),
+      unique: meta?.isUnique,
+      hostileMonster: meta?.side === "invader" && !!meta.family,
     });
   }
 
@@ -469,7 +509,7 @@ export class DungeonView {
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + Math.random();
       const g = new Graphics();
-      g.circle(0, 0, 1.7).fill(color);
+      g.rect(-1.5, -1.5, 3, 3).fill(color);
       g.position.set(x, y);
       this.addFx(g, 14, Math.cos(a) * spread, Math.sin(a) * spread, 0);
     }
@@ -488,6 +528,7 @@ export class DungeonView {
     if (ev.type === "hit" || ev.type === "crit") {
       if (px === undefined || py === undefined) return;
       const crit = ev.type === "crit";
+      if (ev.targetId && (ev.data?.direct || ev.data?.trap)) this.spriteById.get(ev.targetId)?.anim.hurt();
       // Damage-number Text is the most expensive FX; skip it when saturated.
       if (crit || this.fxItems.length < 90) {
         const t = new Text({ text: String(ev.amount ?? 0), style: { fontSize: crit ? 16 : 11, fill: crit ? 0xffe066 : 0xffffff, fontWeight: "bold", stroke: { color: 0x000000, width: 3 } } });
@@ -502,10 +543,21 @@ export class DungeonView {
         const entry = this.spriteById.get(ev.sourceId);
         const ap = this.lastPos.get(ev.sourceId);
         if (entry && ap && ev.x !== undefined && ev.y !== undefined) {
-          entry.anim.attack(ev.x - ap.x, ev.y - ap.y);
+          entry.anim.attack(ev.x - ap.x);
           if (entry.anim.weaponKind !== "melee") this.spawnProjectile(ap.x, ap.y, ev.x, ev.y, entry.anim.weaponKind);
         }
       }
+    } else if (ev.type === "miss" && ev.sourceId && ev.targetId) {
+      const source = this.lastPos.get(ev.sourceId);
+      const target = this.lastPos.get(ev.targetId);
+      if (source && target) this.spriteById.get(ev.sourceId)?.anim.attack(target.x - source.x);
+    } else if (ev.type === "ability" && px !== undefined && py !== undefined) {
+      const effect = ev.data?.effect;
+      if (ev.sourceId && playsCastPose(effect)) {
+        const source = this.lastPos.get(ev.sourceId);
+        this.spriteById.get(ev.sourceId)?.anim.cast(source ? px / TILE - source.x : 0);
+      }
+      this.drawAbility(px, py - 9, effect, ev.data?.radius);
     } else if (ev.type === "trapTrigger" && px !== undefined && py !== undefined) {
       const explode = !!ev.data?.explode;
       this.burst(px, py, explode ? 0xff7733 : 0xffaa33, explode ? 8 : 5, explode ? 26 : 18);
@@ -522,6 +574,39 @@ export class DungeonView {
     } else if (ev.type === "reveal" && px !== undefined && py !== undefined) {
       this.burst(px, py, 0x7fd0ff, 6, 16);
     }
+  }
+
+  private drawAbility(x: number, y: number, effect: unknown, radius: unknown) {
+    const visual = abilityVisual(effect);
+    if (!visual || this.fxItems.length > 128) return;
+    const { color, pattern } = visual;
+    const g = new Graphics();
+    if (pattern === "slash") {
+      g.poly([-17, 5, -6, -8, 15, -11, 6, -6, -10, 9]).fill(color);
+      g.poly([-11, 6, 1, -6, 11, -8, -2, 1]).fill(0xfff5de);
+    } else if (pattern === "cross") {
+      g.rect(-3, -10, 6, 20).rect(-10, -3, 20, 6).fill({ color, alpha: 0.88 });
+    } else if (pattern === "shards") {
+      for (let i = 0; i < 5; i++) {
+        const dx = (i - 2) * 6, height = i % 2 ? 8 : 14;
+        g.poly([dx - 3, 6, dx - 1, -height, dx + 4, 2, dx + 2, 8]).fill({ color, alpha: 0.85 });
+      }
+    } else if (pattern === "spiral") {
+      for (let i = 0; i < 12; i++) {
+        const angle = i * 0.8, r = 3 + i;
+        g.rect(Math.cos(angle) * r, Math.sin(angle) * r * 0.65, 3, 3).fill(color);
+      }
+    } else if (pattern === "embers") {
+      this.spark(x, y, color, 6, 1.4);
+      this.burst(x, y, color, 6, 16);
+      return;
+    } else {
+      const r = typeof radius === "number" ? Math.min(32, 9 + radius * 5) : 13;
+      g.ellipse(0, 0, r, r * 0.63).stroke({ width: 2, color, alpha: 0.83 });
+      g.ellipse(0, 0, r * 0.74, r * 0.46).stroke({ width: 1, color, alpha: 0.52 });
+    }
+    g.position.set(x, y);
+    this.addFx(g, 19, 0, pattern === "cross" ? -0.5 : 0, pattern === "ring" ? 0.045 : 0.01);
   }
 
   private spawnProjectile(sx: number, sy: number, tx: number, ty: number, kind: WeaponKind) {
@@ -577,8 +662,9 @@ export class DungeonView {
   seekTo(cursor: number) {
     if (!this.timeline) return;
     this.cursor = Math.max(0, Math.min(this.timeline.durationTicks, cursor));
+    this.endHold = 0;
     this.lastEventIdx = 0;
-    this.fxLayer.removeChildren();
+    for (const child of this.fxLayer.removeChildren()) child.destroy({ children: true });
     this.fxItems = [];
     this.projectiles = [];
     while (this.lastEventIdx < this.timeline.events.length && this.timeline.events[this.lastEventIdx].tick <= this.cursor) this.lastEventIdx++;

@@ -134,14 +134,30 @@ export function classForTier(arch: Archetype, tier: Tier): ClassDef {
 
 // --- Named uniques (docs/09 §4, 19 §5) ---
 export const UNIQUES: UniqueDef[] = [
-  { id: "uniq_aldric", name: "Sir Aldric the Bold", baseClassId: "adv_warrior_t3", flavor: "Party phys aura" },
-  { id: "uniq_iron_warden", name: "The Iron Warden", baseClassId: "adv_w_guardian", flavor: "Taunt tank" },
-  { id: "uniq_lyra", name: "Lyra Quickbow", baseClassId: "adv_archer_t5", flavor: "Volley" },
-  { id: "uniq_veylin", name: "Magister Veylin", baseClassId: "adv_mage_t7", flavor: "Nukes" },
-  { id: "uniq_cassian", name: "Brother Cassian", baseClassId: "adv_m_cleric", flavor: "Priority heal target" },
-  { id: "uniq_vex", name: "Vex the Unseen", baseClassId: "adv_rogue_t7", flavor: "Mass trap reveal" },
-  { id: "uniq_grimjaw", name: "Grimjaw", baseClassId: "adv_w_berserker", flavor: "Execute" },
-  { id: "uniq_morwenna", name: "Sister Morwenna", baseClassId: "adv_mage_t5", flavor: "AoE" },
-  { id: "uniq_roderic", name: "Captain Roderic", baseClassId: "adv_warrior_t7", flavor: "Army buff" },
-  { id: "uniq_nightingale", name: "Nightingale", baseClassId: "adv_rogue_t5", flavor: "First-strike on core" },
+  { id: "uniq_aldric", name: "Sir Aldric the Bold", baseClassId: "adv_warrior_t3", flavor: "Lion’s Rally strengthens nearby adventurers’ melee attacks.",
+    signature: [ab("auraBuff", "onWaveStart", { phys: 0.14 }, 5)] },
+  { id: "uniq_iron_warden", name: "The Iron Warden", baseClassId: "adv_w_guardian", flavor: "Iron Bulwark grants a shield on arrival.",
+    signature: [ab("shieldOnWaveStart", "onWaveStart", { pct: 0.28 })] },
+  { id: "uniq_lyra", name: "Lyra Quickbow", baseClassId: "adv_archer_t5", flavor: "Split Volley catches defenders near the arrow’s target.",
+    signature: [ab("splash", "onHit", { pct: 0.34 }, 1.6)] },
+  { id: "uniq_veylin", name: "Magister Veylin", baseClassId: "adv_mage_t7", flavor: "Starfire leaves the target burning.",
+    signature: [ab("burnOnHit", "onHit", { dps: 17, dur: 30 })] },
+  { id: "uniq_cassian", name: "Brother Cassian", baseClassId: "adv_m_cleric", flavor: "Pilgrim’s Mercy heals the most wounded ally in range.",
+    signature: [ab("healAlly", "periodic", { amount: 0.17, intervalTicks: 14 }, 5)] },
+  { id: "uniq_vex", name: "Vex the Unseen", baseClassId: "adv_rogue_t7", flavor: "Shadow Sweep reveals traps from farther away.",
+    signature: [ab("invis", "passive", { stealth: 0.48 })], revealRadius: 8 },
+  { id: "uniq_grimjaw", name: "Grimjaw", baseClassId: "adv_w_berserker", flavor: "Headsman’s Chop deals extra damage to badly wounded targets.",
+    signature: [ab("executeLowHp", "onHit", { mult: 1.8 })] },
+  { id: "uniq_morwenna", name: "Sister Morwenna", baseClassId: "adv_mage_t5", flavor: "Moonbreak sweeps a wide area around its target.",
+    signature: [ab("splash", "onHit", { pct: 0.55 }, 2.7)] },
+  { id: "uniq_roderic", name: "Captain Roderic", baseClassId: "adv_warrior_t7", flavor: "Raise the Standard quickens nearby allies’ attacks.",
+    signature: [ab("partyBuff", "onWaveStart", { atkSpeed: 0.14 }, 6)] },
+  { id: "uniq_nightingale", name: "Nightingale", baseClassId: "adv_rogue_t5", flavor: "Silent Opening deals a heavy first strike.",
+    signature: [ab("firstStrike", "passive", { mult: 2 })] },
 ];
+
+export const UNIQUE_BY_ID = Object.fromEntries(UNIQUES.map((hero) => [hero.id, hero]));
+
+export function championAbilities(hero: UniqueDef, base = CLASS_BY_ID[hero.baseClassId]?.abilities ?? []): Ability[] {
+  return [...base.filter((ability) => !hero.signature.some((signature) => signature.effect === ability.effect)), ...hero.signature];
+}

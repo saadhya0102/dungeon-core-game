@@ -2,9 +2,15 @@
 // Economy helpers - costs, rewards, validation predicates (docs/02, 11)
 // Used by both client preview and (future) server authority.
 // ============================================================================
-import type { Tier, UnitDef, Quality } from "./types";
+import type { RunState, Tier, UnitDef, Quality } from "./types";
 import { CONFIG, coreLevelRow, tierBudget } from "./config";
 import { powerScore } from "./power";
+
+export const currencyLabel = (run: RunState) => run.idle ? "Embers" : "DP";
+
+export function dungeonPrice(run: RunState, price: number): number {
+  return run.idle && price > 0 ? Math.max(1, Math.round(10 * Math.pow(price / 20, 0.6))) : price;
+}
 
 export function dpKill(advPowerScore: number, isUnique: boolean): number {
   return Math.round(

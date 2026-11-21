@@ -91,6 +91,11 @@ function pickUniqueFor(arch: Archetype, rng: PRNG) {
 
 const MAX_WAVE_INVADERS = 80;
 
+export function lateWaveScale(wave: number): number {
+  const late = Math.max(0, wave - 20);
+  return 1 + late * 0.025 + late * late * 0.0005;
+}
+
 function makeInvader(wave: number, idx: number, classId: string, tier: Tier, isUnique: boolean, statMult: number, uniqueId?: string): WaveInvader {
   return { id: `inv_${wave}_${idx}`, classId, tier, isUnique, statMult, uniqueId };
 }
@@ -111,13 +116,13 @@ export function generateWave(wave: number, seedRoot: number): WaveDef {
     const baseCls = CLASS_BY_ID[u.baseClassId];
     const tier = Math.max(band[0], Math.min(band[1], baseCls?.tier ?? band[1])) as Tier;
     const mult = rng.range(CONFIG.UNIQUE_STAT_MULT_RANGE[0], CONFIG.UNIQUE_STAT_MULT_RANGE[1]);
-    invaders.push(makeInvader(wave, invaders.length, u.baseClassId, tier, true, Math.round(mult * 100) / 100, u.id));
+    invaders.push(makeInvader(wave, invaders.length, u.baseClassId, tier, true, Math.round(mult * lateWaveScale(wave) * 100) / 100, u.id));
   };
   const addUnit = (arch: Archetype, bias: TierBias | undefined) => {
     if (invaders.length >= MAX_WAVE_INVADERS) return;
     const tier = tierWithBias(band, bias, rng);
     const cls = classForTier(arch, tier);
-    invaders.push(makeInvader(wave, invaders.length, cls.id, cls.tier, false, 1));
+    invaders.push(makeInvader(wave, invaders.length, cls.id, cls.tier, false, lateWaveScale(wave)));
   };
 
   // Curated composition templates when available, else procedural fallback.

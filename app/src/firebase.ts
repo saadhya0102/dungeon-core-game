@@ -13,17 +13,30 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
-export const app = initializeApp(firebaseConfig);
+function connectCloud() {
+  if (import.meta.env.VITE_LOCAL_ONLY === "true" || !firebaseConfig.apiKey?.trim() || !firebaseConfig.projectId?.trim()) return null;
+  try {
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = initializeFirestore(app, { ignoreUndefinedProperties: true });
+    const functions = getFunctions(app, "us-central1");
+    if (import.meta.env.VITE_USE_EMULATORS === "true") {
+      connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+      connectFirestoreEmulator(db, "127.0.0.1", 8080);
+      connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+    }
+    return { auth, db, functions };
+  } catch (error) {
+    console.warn("Cloud services could not start. Using local play.", error);
+    return null;
+  }
+}
 
-export const auth = getAuth(app);
-// ignoreUndefinedProperties: our run/snapshot objects have many optional fields
-// that are `undefined`; without this, Firestore throws and cloud saves fail.
-export const db = initializeFirestore(app, { ignoreUndefinedProperties: true });
-// Cloud Functions region — change here if you deploy functions to another region.
-export const functions = getFunctions(app, "us-central1");
+export const cloud = connectCloud();
+export const auth = cloud?.auth;
+export const db = cloud?.db;
 
-if (import.meta.env.VITE_USE_EMULATORS === "true") {
-  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
-  connectFirestoreEmulator(db, "127.0.0.1", 8080);
-  connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+export function requireCloud() {
+  if (!cloud) throw new Error("Cloud play is unavailable in this installation.");
+  return cloud;
 }

@@ -1,12 +1,12 @@
 // Persistence (docs/13, 16). Firestore when signed in; localStorage fallback.
 import { doc, getDoc, setDoc, collection, getDocs, deleteDoc, query, limit } from "firebase/firestore";
-import { db } from "../firebase";
+import { db, requireCloud } from "../firebase";
 import type { RunState, Snapshot } from "../sim/types";
+import { withDeadline } from "./deadline";
 
-function lsKeyRun(uid: string) { return `dc_run_${uid}`; }
+function lsKeyRun(uid: string, campaign = false) { return `dc_run_${uid}${campaign ? "_campaign" : ""}`; }
+const activeDoc = (uid: string, campaign: boolean) => doc(requireCloud().db, "players", uid, "run", campaign ? "campaign" : "active");
 function lsKeySnaps(uid: string) { return `dc_snaps_${uid}`; }
-
-const useCloud = (uid: string) => uid !== "local";
 
 let cloudWarned = false;
 function warnCloudOnce(e: unknown) {
@@ -15,69 +15,91 @@ function warnCloudOnce(e: unknown) {
   console.warn("Cloud sync unavailable (deploy Firestore rules to enable). Using local saves.", e);
 }
 
+export function saveLocalActiveRun(run: RunState) {
+  try { localStorage.setItem(lsKeyRun(run.uid, !!run.cityId), JSON.stringify(run)); } catch { /* cloud may still be available */ }
+}
+
 export async function saveActiveRun(run: RunState): Promise<void> {
-  if (useCloud(run.uid)) {
+  saveLocalActiveRun(run);
+  if (db && run.uid !== "local") {
     try {
-      await setDoc(doc(db, "players", run.uid, "run", "active"), run as object);
+      await setDoc(activeDoc(run.uid, !!run.cityId), run as object);
       return;
     } catch (e) { warnCloudOnce(e); }
   }
-  try { localStorage.setItem(lsKeyRun(run.uid), JSON.stringify(run)); } catch { /* ignore */ }
 }
 
-export async function loadActiveRun(uid: string): Promise<RunState | null> {
-  if (useCloud(uid)) {
-    try {
-      const snap = await getDoc(doc(db, "players", uid, "run", "active"));
-      if (snap.exists()) return snap.data() as RunState;
-    } catch (e) { warnCloudOnce(e); }
-  }
+function readableRun(value: unknown): RunState | null {
+  const run = value as RunState | null;
+  return run?.id && run.uid && run.core && run.map?.tiles && run.research?.ranks && run.stats
+    && Array.isArray(run.research?.owned) && Array.isArray(run.inventory) && Array.isArray(run.gearShop)
+    && Array.isArray(run.units) && Array.isArray(run.traps) && Array.isArray(run.modifiers)
+    ? run : null;
+}
+
+export function readActiveRun(uid: string, campaign = false): RunState | null {
   try {
-    const raw = localStorage.getItem(lsKeyRun(uid));
-    if (raw) return JSON.parse(raw) as RunState;
-  } catch { /* ignore */ }
-  return null;
+    const raw = localStorage.getItem(lsKeyRun(uid, campaign));
+    return raw ? readableRun(JSON.parse(raw)) : null;
+  } catch { return null; }
 }
 
-export async function clearActiveRun(uid: string): Promise<void> {
-  if (useCloud(uid)) {
-    try { await deleteDoc(doc(db, "players", uid, "run", "active")); } catch { /* ignore */ }
-  }
-  try { localStorage.removeItem(lsKeyRun(uid)); } catch { /* ignore */ }
-}
-
-export async function saveSnapshot(snap: Snapshot): Promise<void> {
-  if (useCloud(snap.uid)) {
+export async function loadActiveRun(uid: string, campaign = false): Promise<RunState | null> {
+  if (db && uid !== "local") {
     try {
-      await setDoc(doc(db, "players", snap.uid, "snapshots", snap.id), snap as object);
-      return;
+      const snap = await withDeadline(getDoc(activeDoc(uid, campaign)));
+      const local = readActiveRun(uid, campaign);
+      const remote = snap.exists() ? readableRun(snap.data()) : null;
+      if (remote && (!local || remote.updatedAt >= local.updatedAt)) { saveLocalActiveRun(remote); return remote; }
+    } catch (e) { warnCloudOnce(e); }
+  }
+  return readActiveRun(uid, campaign);
+}
+
+export async function clearActiveRun(uid: string, campaign = false): Promise<void> {
+  try { localStorage.removeItem(lsKeyRun(uid, campaign)); } catch { /* ignore */ }
+  if (db && uid !== "local") {
+    try { await withDeadline(deleteDoc(activeDoc(uid, campaign))); } catch (e) { warnCloudOnce(e); }
+  }
+}
+
+export async function saveSnapshot(snap: Snapshot): Promise<boolean> {
+  if (db && snap.uid !== "local") {
+    try {
+      await withDeadline(setDoc(doc(db, "players", snap.uid, "snapshots", snap.id), snap as object));
+      return true;
     } catch (e) { warnCloudOnce(e); }
   }
   try {
     const raw = localStorage.getItem(lsKeySnaps(snap.uid));
     const list: Snapshot[] = raw ? JSON.parse(raw) : [];
-    list.push(snap);
-    localStorage.setItem(lsKeySnaps(snap.uid), JSON.stringify(list.slice(-40)));
-  } catch { /* ignore */ }
+    localStorage.setItem(lsKeySnaps(snap.uid), JSON.stringify([...list.filter((item) => item.id !== snap.id), snap].slice(-40)));
+    return true;
+  } catch { return false; }
 }
 
 export async function loadSnapshots(uid: string): Promise<Snapshot[]> {
-  if (useCloud(uid)) {
+  if (db && uid !== "local") {
     try {
-      const col = await getDocs(collection(db, "players", uid, "snapshots"));
-      return col.docs.map((d) => d.data() as Snapshot).sort((a, b) => b.createdAt - a.createdAt);
+      const col = await withDeadline(getDocs(collection(db, "players", uid, "snapshots")));
+      return [...new Map([...cachedSnapshots(uid), ...col.docs.map((d) => d.data() as Snapshot)]
+        .map((snapshot) => [snapshot.id, snapshot])).values()].sort((a, b) => b.createdAt - a.createdAt);
     } catch (e) { warnCloudOnce(e); }
   }
+  return cachedSnapshots(uid).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function cachedSnapshots(uid: string): Snapshot[] {
   try {
     const raw = localStorage.getItem(lsKeySnaps(uid));
     const list: Snapshot[] = raw ? JSON.parse(raw) : [];
-    return list.sort((a, b) => b.createdAt - a.createdAt);
+    return Array.isArray(list) ? list : [];
   } catch { return []; }
 }
 
 export async function deleteSnapshot(uid: string, id: string): Promise<void> {
   if (getMainId(uid) === id) await clearMainDungeon(uid);
-  if (useCloud(uid)) {
+  if (db && uid !== "local") {
     try { await deleteDoc(doc(db, "players", uid, "snapshots", id)); } catch (e) { warnCloudOnce(e); }
   }
   try {
@@ -101,14 +123,14 @@ function setMainId(uid: string, id: string | null) {
 
 export async function setMainDungeon(snap: Snapshot): Promise<void> {
   setMainId(snap.uid, snap.id);
-  if (!useCloud(snap.uid)) return;
+  if (!db || snap.uid === "local") return;
   try { await setDoc(doc(db, "h2hPool", snap.uid), { ...snap, shareable: true } as object); }
   catch (e) { warnCloudOnce(e); }
 }
 
 export async function clearMainDungeon(uid: string): Promise<void> {
   setMainId(uid, null);
-  if (!useCloud(uid)) return;
+  if (!db || uid === "local") return;
   try { await deleteDoc(doc(db, "h2hPool", uid)); } catch { /* ignore */ }
 }
 
@@ -128,9 +150,9 @@ export function setRating(uid: string, n: number): void {
 }
 
 export async function loadPoolOpponents(uid: string, count = 50): Promise<Snapshot[]> {
-  if (!useCloud(uid)) return [];
+  if (!db || uid === "local") return [];
   try {
-    const col = await getDocs(query(collection(db, "h2hPool"), limit(count)));
+    const col = await withDeadline(getDocs(query(collection(db, "h2hPool"), limit(count))));
     return col.docs.map((d) => d.data() as Snapshot).filter((s) => s.uid !== uid);
   } catch (e) { warnCloudOnce(e); return []; }
 }

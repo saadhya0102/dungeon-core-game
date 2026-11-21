@@ -6,7 +6,7 @@ export interface PRNG {
   next(): number;            // [0,1)
   int(maxExclusive: number): number;
   range(min: number, max: number): number; // [min,max) float
-  pick<T>(arr: T[]): T;
+  pick<T>(arr: readonly T[]): T;
   weighted<T>(items: T[], weights: number[]): T;
   bool(p: number): boolean;
   fork(salt: number): PRNG;
@@ -34,7 +34,7 @@ export function makePRNG(seed: number): PRNG {
     next,
     int: (maxExclusive: number) => Math.floor(next() * maxExclusive),
     range: (min: number, max: number) => min + next() * (max - min),
-    pick: <T>(arr: T[]): T => arr[Math.floor(next() * arr.length)],
+    pick: <T>(arr: readonly T[]): T => arr[Math.floor(next() * arr.length)],
     weighted: <T>(items: T[], weights: number[]): T => {
       let total = 0;
       for (const w of weights) total += w;

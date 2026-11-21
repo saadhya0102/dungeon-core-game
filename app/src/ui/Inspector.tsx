@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useStore } from "../state/store";
 import { UNIT_BY_ID } from "../sim/content/units";
 import { TRAP_BY_ID } from "../sim/content/traps";
-import { spaceCost } from "../sim";
+import { collapseTile, spaceCost } from "../sim";
 import type { GearItem, GearSlot } from "../sim/types";
 import { abilityList } from "./abilityText";
 
@@ -23,6 +23,8 @@ export function Inspector() {
   const beginMove = useStore((s) => s.beginMove);
   const cancelMove = useStore((s) => s.cancelMove);
   const pendingMove = useStore((s) => s.pendingMove);
+  const act = useStore((s) => s.act);
+  const select = useStore((s) => s.select);
   const [equipSlot, setEquipSlot] = useState<GearSlot | null>(null);
 
   if (pendingMove) {
@@ -37,13 +39,24 @@ export function Inspector() {
 
   if (!run || !selection) return null;
 
+  if (run.idle && selection.kind === "tile" && selection.x != null && selection.y != null) {
+    const { x, y } = selection;
+    const tile = run.map.tiles[`${x},${y}`];
+    if (tile?.state !== "floor") return null;
+    return <div className="inspector"><h3>Excavated floor</h3>
+      <button onClick={() => { if (act((draft) => collapseTile(draft, x, y))) select(null); }}>
+        Fill tile · +{tile.excavationRefund ?? 0} Embers
+      </button>
+    </div>;
+  }
+
   if (selection.kind === "core") {
     return (
       <div className="inspector">
         <h3>Dungeon Core</h3>
         <div className="row"><span>Level</span><b>{run.core.level}</b></div>
         <div className="row"><span>HP</span><b>{Math.ceil(run.core.hp)}/{run.core.maxHp}</b></div>
-        <div className="hint">If the core dies, the run ends. Move it to reshape the route invaders must take.</div>
+        <div className="hint">{run.idle ? "The core repairs between patrols. Move it to reshape the route." : "If the core dies, the run ends. Move it to reshape the route invaders must take."}</div>
         <button style={{ width: "100%" }} onClick={beginMove}>Move Core</button>
       </div>
     );
@@ -74,7 +87,7 @@ export function Inspector() {
         {def.effect.damage ? <div className="row"><span>Damage</span><b>{def.effect.damage}</b></div> : null}
         <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
           <button style={{ flex: 1 }} onClick={beginMove}>Move</button>
-          <button className="danger" style={{ flex: 1 }} onClick={sellSelected}>Sell</button>
+          <button className="danger" style={{ flex: 1 }} onClick={sellSelected}>{run.idle ? `Refund ${trap?.paidEmbers ?? 0}` : "Sell"}</button>
         </div>
       </div>
     );
@@ -146,7 +159,7 @@ export function Inspector() {
 
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
           <button style={{ flex: 1 }} onClick={beginMove}>Move</button>
-          <button className="danger" style={{ flex: 1 }} onClick={sellSelected}>Sell</button>
+          <button className="danger" style={{ flex: 1 }} onClick={sellSelected}>{run.idle ? `Refund ${unit.paidEmbers ?? 0}` : "Sell"}</button>
         </div>
       </div>
     );

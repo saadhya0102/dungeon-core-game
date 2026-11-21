@@ -55,7 +55,7 @@ const STEPS: Step[] = [
     id: "buildbar", anchor: "buildbar",
     title: "Build Tools (left bar)",
     body:
-      "Select: click things to inspect/move them. Dig: carve open stone. Units/Traps: buy " +
+      "Inspect: click things to see their details or move them. Dig: carve open stone. Recruit and Traps: buy " +
       "and place defenders. Research: unlock monsters & upgrades. Gear Shop (CL3+): buy " +
       "equipment. Core Up: level your core. Save Dungeon: bank this layout for Head-to-Head.",
   },
@@ -73,7 +73,7 @@ const STEPS: Step[] = [
     id: "place", anchor: "buildbar",
     title: "Place Your First Monster",
     body:
-      "Open Units, click a monster (start with a cheap Goblin), then click an open floor tile " +
+      "Open Recruit, choose a monster (start with a Goblin Grunt), then click an open floor tile " +
       "to place it. Tip: a unit can be near at most 5 others, and same-FACTION units near each " +
       "other gain a stat bonus \u2014 so build themed rooms.",
     actionHint: "Place a unit to continue\u2026",
@@ -93,10 +93,10 @@ const STEPS: Step[] = [
     id: "runwave", anchor: "bottombar",
     title: "Run the Wave",
     body:
-      "When ready, set a playback speed and press Run Wave. Ranged units and mages need LINE " +
+      "When ready, set a playback speed and press Start wave. Ranged units and mages need LINE " +
       "OF SIGHT \u2014 they can't shoot through unexplored stone \u2014 so give them clear lanes. " +
       "Watch how the fight goes and learn what to adjust.",
-    actionHint: "Press Run Wave to continue\u2026",
+    actionHint: "Start the wave to continue…",
     action: (_run, phase) => phase === "wave" || phase === "result",
   },
   {
@@ -129,6 +129,7 @@ export function GuidedTutorial() {
   const run = useStore((s) => s.run);
   const phase = useStore((s) => s.phase);
   const selection = useStore((s) => s.selection);
+  const openPanel = useStore((s) => s.openPanel);
   const [step, setStep] = useState(0);
   const [active, setActive] = useState(false);
   const [dismissed, setDismissed] = useState(false);
@@ -152,6 +153,7 @@ export function GuidedTutorial() {
   }, [active, run, phase, selKind, cur]);
 
   if (!active || dismissed || !run) return null;
+  if (openPanel || run.idle) return null;
   if (phase === "wave") return null; // don't cover the battle
   if (!cur) return null;
 
@@ -161,7 +163,18 @@ export function GuidedTutorial() {
 
   const spot = spotlightRect(cur.anchor);
   const card = cardPosition(cur.anchor, cur.big);
-  const waiting = !!cur.action && !cur.action(run, phase, selKind);
+  if (cur.action) {
+    return (
+      <aside className="guided-action" aria-label="Tutorial">
+        <div><strong>{cur.title}</strong><p>{cur.body}</p></div>
+        <div className="guided-actions">
+          <span>{cur.actionHint}</span>
+          {step > 0 && <button onClick={back}>Back</button>}
+          <button onClick={finish}>Skip tutorial</button>
+        </div>
+      </aside>
+    );
+  }
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60, pointerEvents: "none" }}>
@@ -190,9 +203,7 @@ export function GuidedTutorial() {
           {step > 0 && <button onClick={back}>Back</button>}
           <button className="small" style={{ marginLeft: 0 }} onClick={finish}>Skip tutorial</button>
           <div style={{ flex: 1 }} />
-          {waiting
-            ? <span className="small" style={{ color: "var(--gold)" }}>{cur.actionHint}</span>
-            : <button className="primary" onClick={next}>{step >= STEPS.length - 1 ? "Finish" : "Next"}</button>}
+          <button className="primary" onClick={next}>{step >= STEPS.length - 1 ? "Finish" : "Next"}</button>
         </div>
       </div>
     </div>
@@ -213,6 +224,9 @@ function spotlightRect(anchor: Anchor): CSSProperties | null {
 
 function cardPosition(anchor: Anchor, big?: boolean): CSSProperties {
   const w = window.innerWidth;
+  if (w < 620 && (anchor === "buildbar" || anchor === "inspector")) {
+    return { top: 76, left: "50%", transform: "translateX(-50%)" };
+  }
   switch (anchor) {
     case "topbar": return { top: 64, left: "50%", transform: "translateX(-50%)" };
     case "buildbar": return { top: 96, left: 168 };

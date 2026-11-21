@@ -3,11 +3,11 @@
 // ============================================================================
 import type {
   RunState, WaveDef, SimEntity, ResolvedStats, StatBlock, GearItem,
-  Affinities, AffinityType, Ability, Tier, Family, UnitRole,
+  Affinities, AffinityType, Ability, Tier, Family, UnitRole, UnitDef,
 } from "./types";
 import { resolveStats } from "./power";
 import { UNIT_BY_ID, UNIT_DMG } from "./content/units";
-import { CLASS_BY_ID } from "./content/enemies";
+import { CLASS_BY_ID, UNIQUE_BY_ID, championAbilities } from "./content/enemies";
 import { RESEARCH_BY_ID } from "./content/research";
 import { CONFIG } from "./config";
 import { key } from "./maputil";
@@ -37,6 +37,7 @@ export interface ResearchMods {
 
 export function computeResearchMods(run: RunState): ResearchMods {
   const mods: ResearchMods = { family: {}, cross: {}, capacityPct: 0, dpKillPct: 0, unitCostPct: 0, digCostPct: 0 };
+  mods.digCostPct -= (run.buildings?.quarry ?? 0) * 0.04;
   for (const id of run.research.owned) {
     const node = RESEARCH_BY_ID[id];
     if (!node) continue;
@@ -82,6 +83,22 @@ function applyResearchToStats(
     (out[key2] as number) = (out[key2] as number) * (1 + (pct as number));
   }
   return out;
+}
+
+export function monsterStats(run: RunState, def: UnitDef, mods = computeResearchMods(run)): ResolvedStats {
+  const stats = applyResearchToStats(resolveStats(def.stats), def.family, def.role, mods);
+  const buildings = run.buildings;
+  const roleBuilding = { meleeAll: "barracks", rangedAll: "range", casterAll: "spire" } as const;
+  const faction = (buildings?.[def.family] ?? 0) * 0.04;
+  const general = (buildings?.reliquary ?? 0) * 0.02;
+  const rank = (run.monsterRanks?.[def.id] ?? 0) * 0.12;
+  const tank = def.role === "tank" ? (buildings?.bastion ?? 0) * 0.05 : 0;
+  const offense = (buildings?.[roleBuilding[ROLE_DMG_GROUP[def.role]]] ?? 0) * 0.05;
+  stats.hp *= 1 + faction + general + rank + tank;
+  for (const stat of ["phys", "mag", "rng"] as const) {
+    stats[stat] *= 1 + faction + general + rank + offense;
+  }
+  return stats;
 }
 
 function applyGear(stats: ResolvedStats, items: GearItem[], affinities: Affinities): ResolvedStats {
@@ -146,8 +163,7 @@ export function buildDungeonEntities(run: RunState, mods: ResearchMods): SimEnti
   for (const pu of run.units) {
     const def = UNIT_BY_ID[pu.defId];
     if (!def) continue;
-    let stats = resolveStats(def.stats);
-    stats = applyResearchToStats(stats, def.family, def.role, mods);
+    let stats = monsterStats(run, def, mods);
     const gear = gearItemsFor(run, [pu.gear.weapon, pu.gear.armor, ...(pu.gear.accessory ?? [])]);
     stats = applyGear(stats, gear, def.affinities);
     // Family adjacency bonus: nearby same-family allies grant a minor stat boost.
@@ -158,6 +174,9 @@ export function buildDungeonEntities(run: RunState, mods: ResearchMods): SimEnti
     }
     const passives = applyAbilityPassives(stats, def.abilities ?? []);
     stats = passives.stats;
+    if (run.swiftRule === "weakened") {
+      for (const stat of ["hp", "phys", "mag", "rng"] as const) stats[stat] *= 0.75;
+    }
     const dmgKind = UNIT_DMG[pu.defId] ?? "melee";
     const pdt: AffinityType = dmgKind === "ranged" ? "ranged" : dmgKind === "arcane" ? "arcane" : "melee";
     const ent = makeEntity({
@@ -180,8 +199,25 @@ export function buildInvaderEntities(wave: WaveDef, entrance: { x: number; y: nu
   const groupSize = Math.max(1, CONFIG.WAVE_STAGGER_GROUP);
   const intervalTicks = Math.max(1, Math.round(CONFIG.TICKS_PER_SEC * CONFIG.WAVE_STAGGER_SEC));
   wave.invaders.forEach((inv, i) => {
+    const monster = inv.monster && UNIT_BY_ID[inv.classId];
+    if (monster && inv.monster) {
+      const passives = applyAbilityPassives(inv.monster.stats, monster.abilities ?? []);
+      const kind = UNIT_DMG[monster.id];
+      const entity = makeEntity({
+        id: inv.id, side: "invader", defId: monster.id, name: monster.name, family: monster.family,
+        tier: monster.tier, stats: passives.stats, affinities: monster.affinities, abilities: monster.abilities ?? [],
+        x: entrance.x, y: entrance.y,
+        primaryDamageType: kind === "arcane" ? "arcane" : kind === "ranged" ? "ranged" : "melee",
+      });
+      entity.invisible = passives.invisible;
+      entity.spawnTick = inv.monster.spawnTick;
+      out.push(entity);
+      return;
+    }
     const cls = CLASS_BY_ID[inv.classId];
     if (!cls) return;
+    const champion = inv.uniqueId ? UNIQUE_BY_ID[inv.uniqueId] : undefined;
+    const abilities = champion ? championAbilities(champion, cls.abilities) : cls.abilities ?? [];
     const stats = resolveStats(cls.stats);
     if (inv.statMult !== 1) {
       stats.hp = Math.round(stats.hp * inv.statMult);
@@ -191,15 +227,15 @@ export function buildInvaderEntities(wave: WaveDef, entrance: { x: number; y: nu
       stats.def = Math.round(stats.def * inv.statMult);
     }
     const pdt = primaryDamageType(stats.phys, stats.mag, stats.rng, cls.archetype === "mage" ? "arcane" : cls.archetype === "archer" ? "ranged" : "melee");
-    const passives = applyAbilityPassives(stats, cls.abilities ?? []);
+    const passives = applyAbilityPassives(stats, abilities);
     // jitter spawn around entrance deterministically
     const angle = (i * 2.39996); // golden angle
     const r = 0.2 + (i % 5) * 0.12;
     const ent = makeEntity({
-      id: inv.id, side: "invader", defId: inv.classId, name: cls.name, archetype: cls.archetype,
-      tier: inv.tier, stats: passives.stats, affinities: cls.affinities, abilities: cls.abilities ?? [],
+      id: inv.id, side: "invader", defId: inv.classId, name: champion?.name ?? cls.name, archetype: cls.archetype,
+      tier: inv.tier, stats: passives.stats, affinities: cls.affinities, abilities,
       x: entrance.x + Math.cos(angle) * r, y: entrance.y + Math.sin(angle) * r,
-      isUnique: inv.isUnique, revealRadius: cls.revealRadius ?? 0, primaryDamageType: pdt,
+      isUnique: inv.isUnique, uniqueId: champion?.id, revealRadius: champion?.revealRadius ?? cls.revealRadius ?? 0, primaryDamageType: pdt,
     });
     ent.invisible = passives.invisible;
     ent.spawnTick = stagger ? Math.floor(i / groupSize) * intervalTicks : 0;
@@ -212,12 +248,12 @@ function makeEntity(p: {
   id: string; side: "dungeon" | "invader"; defId: string; name: string;
   family?: Family; archetype?: SimEntity["archetype"]; tier: Tier;
   stats: ResolvedStats; affinities: Affinities; abilities: Ability[];
-  x: number; y: number; isTurret?: boolean; isUnique?: boolean; revealRadius?: number;
+  x: number; y: number; isTurret?: boolean; isUnique?: boolean; uniqueId?: string; revealRadius?: number;
   primaryDamageType: AffinityType;
 }): SimEntity {
   return {
     id: p.id || eid(p.side), side: p.side, defId: p.defId, name: p.name,
-    family: p.family, archetype: p.archetype, tier: p.tier, isUnique: p.isUnique,
+    family: p.family, archetype: p.archetype, tier: p.tier, isUnique: p.isUnique, uniqueId: p.uniqueId,
     isTurret: p.isTurret, x: p.x, y: p.y, homeX: Math.round(p.x), homeY: Math.round(p.y),
     hp: Math.round(p.stats.hp), maxHp: Math.round(p.stats.hp), shield: 0,
     stats: p.stats, affinities: p.affinities, abilities: p.abilities,

@@ -4,6 +4,7 @@
 import type { RunState, DungeonMap, NGModifier, RunStats } from "./types";
 import { CONFIG, coreLevelRow, SIM_VERSION } from "./config";
 import { STARTER_RESEARCH } from "./content/research";
+import type { SwiftRule } from "./kingdom";
 
 export const ORIGIN = 30; // place starting dungeon around (30,30) to keep coords positive
 
@@ -14,32 +15,34 @@ export function emptyRunStats(): RunStats {
   };
 }
 
-export function createStartingMap(): DungeonMap {
+export function createStartingMap(size = 5): DungeonMap {
   const tiles: DungeonMap["tiles"] = {};
   const cx = ORIGIN, cy = ORIGIN;
-  for (let x = cx - 2; x <= cx + 2; x++) {
-    for (let y = cy - 2; y <= cy + 2; y++) {
+  const start = -Math.floor(size / 2);
+  const last = start + size - 1;
+  for (let x = cx + start; x <= cx + last; x++) {
+    for (let y = cy + start; y <= cy + last; y++) {
       tiles[`${x},${y}`] = { state: "floor" };
     }
   }
   tiles[`${cx},${cy}`] = { state: "core" };
-  const ex = cx + 2, ey = cy + 2;
+  const ex = cx + last, ey = cy + last;
   tiles[`${ex},${ey}`] = { state: "entrance" };
   return {
     width: 64, height: 64,
     core: { x: cx, y: cy },
     entrance: { x: ex, y: ey },
     tiles,
-    openedCount: 25,
+    openedCount: size * size,
   };
 }
 
-export function createNewRun(uid: string, modifiers: NGModifier[] = [], seed?: number): RunState {
+export function createNewRun(uid: string, modifiers: NGModifier[] = [], seed?: number, swiftRule?: SwiftRule): RunState {
   const cl0 = coreLevelRow(1);
   const startDp = CONFIG.STARTING_DP + (modifiers.includes("fastStart") ? 200 : 0);
   const now = Date.now();
   return {
-    id: `run_${now.toString(36)}`,
+    id: `run_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     uid,
     status: "active",
     createdAt: now,
@@ -47,15 +50,16 @@ export function createNewRun(uid: string, modifiers: NGModifier[] = [], seed?: n
     wave: 1,
     dp: startDp,
     core: { level: 1, hp: cl0.coreHp, maxHp: cl0.coreHp, ward: 0, wardMax: 0 },
-    map: createStartingMap(),
+    map: createStartingMap(swiftRule === "oneRoom" ? 10 : 5),
     units: [],
     traps: [],
     inventory: [],
-    research: { owned: [...STARTER_RESEARCH], ranks: {} },
+    research: { owned: swiftRule === "noUnits" ? [...STARTER_RESEARCH, "res_basic_traps"] : [...STARTER_RESEARCH], ranks: {} },
     gearShop: [],
     rngSeedRoot: seed ?? Math.floor(Math.random() * 0x7fffffff),
     modifiers,
     simVersion: SIM_VERSION,
     stats: emptyRunStats(),
+    ...(swiftRule ? { swiftRule } : {}),
   };
 }

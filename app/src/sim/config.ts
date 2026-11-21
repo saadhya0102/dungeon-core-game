@@ -127,7 +127,7 @@ export interface CoreLevelRow {
 }
 
 export const CORE_LEVELS: CoreLevelRow[] = [
-  { cl: 1, cost: 0, coreHp: 200, capacity: 5, sizeCap: 49, maxUnitTier: 2, researchTier: 1 },
+  { cl: 1, cost: 0, coreHp: 200, capacity: 5, sizeCap: 50, maxUnitTier: 2, researchTier: 1 },
   { cl: 2, cost: 120, coreHp: 320, capacity: 9, sizeCap: 81, maxUnitTier: 2, researchTier: 1 },
   { cl: 3, cost: 220, coreHp: 480, capacity: 14, sizeCap: 121, maxUnitTier: 3, researchTier: 2 },
   { cl: 4, cost: 380, coreHp: 700, capacity: 22, sizeCap: 169, maxUnitTier: 3, researchTier: 2 },

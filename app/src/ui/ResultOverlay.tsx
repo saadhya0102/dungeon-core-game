@@ -1,12 +1,33 @@
 import { useStore } from "../state/store";
-import { saveSnapshot } from "../net/persistence";
+import { useState } from "react";
+import { claimCity } from "../net/kingdom";
+import { clearActiveRun, saveSnapshot } from "../net/persistence";
+import { CAMPAIGN } from "../sim/kingdom";
 import type { Snapshot } from "../sim/types";
 
 export function ResultOverlay() {
   const result = useStore((s) => s.lastResult);
   const run = useStore((s) => s.run);
   const backToBuild = useStore((s) => s.backToBuild);
+  const [claiming, setClaiming] = useState(false);
+  const [error, setError] = useState("");
   if (!result || !run) return null;
+  const city = CAMPAIGN.find((entry) => entry.id === run.cityId);
+
+  async function finishCity() {
+    if (!city || !run || claiming) return;
+    setClaiming(true);
+    setError("");
+    try {
+      await claimCity(run);
+      await clearActiveRun(run.uid, true);
+      backToBuild();
+    } catch {
+      setError("Your city clear could not be saved. Try again to return.");
+    } finally {
+      setClaiming(false);
+    }
+  }
 
   async function retire(source: "death" | "retire") {
     if (!run) return;
@@ -29,19 +50,28 @@ export function ResultOverlay() {
     backToBuild();
   }
 
+  if (city && result.cityCleared) {
+    return <div className="result"><div className="box">
+      <h2>{city.name} defended</h2>
+      <p>You survived all {city.waves} waves. A first clear earns {city.shards} shards.</p>
+      {error && <p role="alert">{error}</p>}
+      <button className="primary big" disabled={claiming} onClick={() => void finishCity()}>{claiming ? "Saving…" : "Return to campaign"}</button>
+    </div></div>;
+  }
+
   if (result.died) {
     return (
       <div className="result">
         <div className="box">
           <h2 style={{ color: "var(--danger)" }}>The Core Has Fallen</h2>
-          <p>Your dungeon survived to wave {run.stats.bestWave || run.wave}.</p>
+          <p>{city ? `${city.name} · ${run.stats.wavesCleared}/${city.waves} waves cleared` : `Swift best this run · wave ${run.stats.bestWave}`}</p>
           <div className="row" style={{ justifyContent: "center", gap: 16 }}>
             <span>Total kills: {run.stats.kills}</span>
             <span>DP earned: {run.stats.dpEarned}</span>
           </div>
-          <p className="small">Your final dungeon is saved as a snapshot for Head-to-Head.</p>
-          <button className="primary big" style={{ marginTop: 12, width: "100%" }} onClick={() => retire("death")}>
-            Save &amp; Return to Menu
+          {!city && <p className="small">Save this dungeon to your snapshot library.</p>}
+          <button className="primary big" style={{ marginTop: 12, width: "100%" }} onClick={() => city ? backToBuild() : void retire("death")}>
+            {city ? "Return to campaign" : "Save & return to Swift"}
           </button>
         </div>
       </div>

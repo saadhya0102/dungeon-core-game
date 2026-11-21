@@ -13,6 +13,7 @@ import {
   createNewRun, resolveWave, applyWaveResult,
 } from "../../app/src/sim";
 import type { RunState, NGModifier } from "../../app/src/sim";
+export { createDuel, joinDuel, playDuel } from "./duels";
 
 initializeApp();
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });

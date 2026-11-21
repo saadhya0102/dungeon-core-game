@@ -2,16 +2,17 @@
 // Game action helpers (docs/02,03,06,07,16). Pure-ish: mutate the given run
 // and return an error string (or null on success). Shared client + server.
 // ============================================================================
-import type { RunState, PlacedUnit, GearSlot, Tier } from "./types";
+import type { RunState, PlacedUnit, GearSlot, Tier, UnitDef } from "./types";
 import { CONFIG, coreLevelRow, spaceCost, wardForCl, roomRadius } from "./config";
 import { UNIT_BY_ID } from "./content/units";
 import { TRAP_BY_ID } from "./content/traps";
 import { RESEARCH_BY_ID, unlockedUnitIds } from "./content/research";
 import { computeResearchMods } from "./combat";
-import { unitCost, turretCost, digCost, gearPrice, salvageValue, clUpgradeCost } from "./economy";
+import { unitCost, turretCost, digCost, gearPrice, salvageValue, clUpgradeCost, dungeonPrice, currencyLabel } from "./economy";
 import { key, isPassable, pathExists, neighbors, validatePaths, manhattan, roomOpen } from "./maputil";
 import { generateGear, rollQuality } from "./content/gear";
 import { makePRNG } from "./rng";
+import { swiftAllowsUnit } from "./kingdom";
 
 export type ActionResult = string | null; // error message or null on success
 
@@ -44,7 +45,7 @@ function nearbyUnitCount(run: RunState, x: number, y: number, excludeId?: string
 }
 
 export function unlockedUnits(run: RunState): Set<string> {
-  return unlockedUnitIds(run.research.owned);
+  return new Set([...unlockedUnitIds(run.research.owned)].filter((id) => swiftAllowsUnit(run, UNIT_BY_ID[id])));
 }
 
 function trapUnlocked(run: RunState, tier: number): boolean {
@@ -64,22 +65,78 @@ function refund(run: RunState, amount: number) {
   run.dp += amount;
 }
 
+const insufficient = (run: RunState) => `Not enough ${currencyLabel(run)}`;
+
+export function recruitPrice(run: RunState, def: UnitDef, turret = false): number {
+  const base = turret ? turretCost(def) : unitCost(def);
+  return dungeonPrice(run, Math.max(1, Math.round(base * (1 + computeResearchMods(run).unitCostPct))));
+}
+
 // --- Digging ---
-export function digTile(run: RunState, x: number, y: number): ActionResult {
+export function sizeCap(run: RunState): number {
+  return run.swiftRule === "oneRoom" ? 100 : coreLevelRow(run.core.level).sizeCap;
+}
+
+function inMap(run: RunState, x: number, y: number): boolean {
+  return Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < run.map.width && y < run.map.height;
+}
+
+function excavationCost(run: RunState, count: number): number {
+  const multiplier = 1 + computeResearchMods(run).digCostPct;
+  return Array.from({ length: count }, (_, index) =>
+    dungeonPrice(run, Math.max(1, Math.round(digCost(run.map.openedCount + index) * multiplier))))
+    .reduce((total, cost) => total + cost, 0);
+}
+
+export const roomCost = (run: RunState) => excavationCost(run, 15);
+export const tileCost = (run: RunState) => excavationCost(run, 1);
+
+/** The selected tile is the center of a solid 5 by 5 room. */
+export function buyRoom(run: RunState, x: number, y: number, preview = false): ActionResult {
+  if (run.swiftRule === "oneRoom") return "This challenge has a fixed room";
+  if (!inMap(run, x - 2, y - 2) || !inMap(run, x + 2, y + 2)) return "Room must fit inside the dungeon";
+  if (run.map.openedCount + 25 > sizeCap(run)) return "Upgrade the core to make space for a room";
+  const tiles: [number, number][] = [];
+  for (let row = y - 2; row <= y + 2; row++) {
+    for (let column = x - 2; column <= x + 2; column++) tiles.push([column, row]);
+  }
+  if (tiles.some(([tx, ty]) => isPassable(run.map, tx, ty))) return "Choose a 5 × 5 area of solid stone";
+  if (!tiles.some(([tx, ty]) => neighbors(tx, ty).some(([nx, ny]) => isPassable(run.map, nx, ny)))) {
+    return "The new room needs an open tile along one edge";
+  }
+  const cost = roomCost(run);
+  if (run.dp < cost) return insufficient(run);
+  if (preview) return null;
+  spend(run, cost);
+  const refundTotal = run.idle ? cost : Math.floor(cost * CONFIG.DIG_REFUND);
+  const perTile = Math.floor(refundTotal / tiles.length);
+  tiles.forEach(([tx, ty], index) => {
+    const extra = run.idle && index < refundTotal % tiles.length ? 1 : 0;
+    run.map.tiles[key(tx, ty)] = { state: "floor", excavationRefund: perTile + extra };
+  });
+  run.map.openedCount += tiles.length;
+  return null;
+}
+
+export function digTile(run: RunState, x: number, y: number, preview = false): ActionResult {
+  if (run.swiftRule === "oneRoom") return "This challenge has a fixed room";
+  if (!inMap(run, x, y)) return "Outside the dungeon";
   if (isPassable(run.map, x, y)) return "Already open";
   // adjacency
   const adj = neighbors(x, y).some(([nx, ny]) => isPassable(run.map, nx, ny));
   if (!adj) return "Must be adjacent to open floor";
-  if (run.map.openedCount >= coreLevelRow(run.core.level).sizeCap) return "Size cap reached (upgrade Core Level)";
-  const mods = computeResearchMods(run);
-  const cost = Math.max(1, Math.round(digCost(run.map.openedCount) * (1 + mods.digCostPct)));
-  if (!spend(run, cost)) return "Not enough DP";
-  run.map.tiles[key(x, y)] = { state: "floor" };
+  if (run.map.openedCount >= sizeCap(run)) return "Size cap reached (upgrade Core Level)";
+  const cost = tileCost(run);
+  if (run.dp < cost) return insufficient(run);
+  if (preview) return null;
+  spend(run, cost);
+  run.map.tiles[key(x, y)] = { state: "floor", excavationRefund: run.idle ? cost : Math.floor(cost * CONFIG.DIG_REFUND) };
   run.map.openedCount++;
   return null;
 }
 
 export function collapseTile(run: RunState, x: number, y: number): ActionResult {
+  if (run.swiftRule === "oneRoom") return "This challenge has a fixed room";
   const t = run.map.tiles[key(x, y)];
   if (!t || t.state !== "floor") return "Can only collapse open floor";
   if (t.unitId || t.trapId) return "Tile is occupied";
@@ -91,14 +148,16 @@ export function collapseTile(run: RunState, x: number, y: number): ActionResult 
     run.map.openedCount++;
     return "Would block the path to the core";
   }
-  refund(run, Math.round(digCost(run.map.openedCount) * CONFIG.DIG_REFUND));
+  refund(run, t.excavationRefund ?? (run.idle ? 0 : Math.round(digCost(run.map.openedCount) * CONFIG.DIG_REFUND)));
   return null;
 }
 
 // --- Units ---
-export function placeUnit(run: RunState, defId: string, x: number, y: number, turretMode = false): ActionResult {
+export function placeUnit(run: RunState, defId: string, x: number, y: number, turretMode = false, preview = false): ActionResult {
   const def = UNIT_BY_ID[defId];
   if (!def) return "Unknown unit";
+  if (!swiftAllowsUnit(run, def)) return "This unit is banned by the Swift rules";
+  if (turretMode && run.swiftRule === "unitsOnly") return "Turrets are banned in Units Only";
   if (!unlockedUnits(run).has(defId)) return "Not researched yet";
   if (def.tier > coreLevelRow(run.core.level).maxUnitTier) return `Requires higher Core Level (T${def.tier})`;
   const t = run.map.tiles[key(x, y)];
@@ -118,13 +177,15 @@ export function placeUnit(run: RunState, defId: string, x: number, y: number, tu
   const isTurret = turretMode && !!def.turretCapable;
   if (turretMode && !def.turretCapable) return "This unit can't be a turret";
   if (isTurret && run.core.level < 2) return "Turrets unlock at Core Level 2";
-  const mods = computeResearchMods(run);
-  const baseCost = isTurret ? turretCost(def) : unitCost(def);
-  const cost = Math.max(1, Math.round(baseCost * (1 + mods.unitCostPct)));
-  if (!spend(run, cost)) return "Not enough DP";
+  const cost = recruitPrice(run, def, isTurret);
+  if (run.dp < cost) return insufficient(run);
+  if (preview) return null;
+  spend(run, cost);
   const unit: PlacedUnit = { id: newId("u"), defId, x, y, isTurret, gear: { accessory: [] } };
+  if (run.idle) unit.paidEmbers = cost;
   run.units.push(unit);
   t.unitId = unit.id;
+  if (run.swiftRule === "singleFaction") run.chosenFaction = def.family;
   return null;
 }
 
@@ -158,7 +219,8 @@ export function sellUnit(run: RunState, unitId: string): ActionResult {
   if (idx < 0) return "No such unit";
   const unit = run.units[idx];
   const def = UNIT_BY_ID[unit.defId];
-  if (def) {
+  if (run.idle) refund(run, unit.paidEmbers ?? 0);
+  else if (def) {
     const base = unit.isTurret ? turretCost(def) : unitCost(def);
     refund(run, Math.round(base * CONFIG.SELL_REFUND));
   }
@@ -175,7 +237,8 @@ export function maxTraps(run: RunState): number {
   return CONFIG.TRAPS_BASE + Math.floor(run.core.level * CONFIG.TRAPS_PER_CL);
 }
 
-export function placeTrap(run: RunState, defId: string, x: number, y: number): ActionResult {
+export function placeTrap(run: RunState, defId: string, x: number, y: number, preview = false): ActionResult {
+  if (run.swiftRule === "unitsOnly") return "Traps are banned in Units Only";
   const def = TRAP_BY_ID[defId];
   if (!def) return "Unknown trap";
   if (!trapUnlocked(run, def.tier)) return "Trap type not researched";
@@ -188,15 +251,22 @@ export function placeTrap(run: RunState, defId: string, x: number, y: number): A
   if (manhattan(x, y, run.map.entrance.x, run.map.entrance.y) <= CONFIG.ENTRANCE_SAFE_RADIUS) return "Too close to the entrance";
   // core halo
   if (Math.max(Math.abs(x - run.map.core.x), Math.abs(y - run.map.core.y)) <= CONFIG.CORE_NOBUILD_HALO) return "Too close to the core";
-  if (!spend(run, def.cost)) return "Not enough DP";
+  const cost = dungeonPrice(run, def.cost);
+  if (preview) {
+    if (run.dp < cost) return insufficient(run);
+    const tiles = { ...run.map.tiles, [key(x, y)]: { ...t, trapId: "preview" } };
+    return pathExists({ ...run.map, tiles }, run.map.entrance, run.map.core, true) ? null : "This would block the only safe path to the core";
+  }
+  if (!spend(run, cost)) return insufficient(run);
   const id = newId("t");
-  run.traps.push({ id, defId, x, y });
+  run.traps.push({ id, defId, x, y, ...(run.idle ? { paidEmbers: cost } : {}) });
   t.trapId = id;
   // fair-lane must still exist
   if (!pathExists(run.map, run.map.entrance, run.map.core, true)) {
     run.traps.pop();
     delete t.trapId;
-    refund(run, def.cost);
+    refund(run, cost);
+    run.stats.dpSpent -= cost;
     return "This would block the only safe path to the core";
   }
   return null;
@@ -247,7 +317,8 @@ export function sellTrap(run: RunState, trapId: string): ActionResult {
   if (idx < 0) return "No such trap";
   const trap = run.traps[idx];
   const def = TRAP_BY_ID[trap.defId];
-  if (def) refund(run, Math.round(def.cost * CONFIG.SELL_REFUND_TRAP));
+  if (run.idle) refund(run, trap.paidEmbers ?? 0);
+  else if (def) refund(run, Math.round(def.cost * CONFIG.SELL_REFUND_TRAP));
   const tile = run.map.tiles[key(trap.x, trap.y)];
   if (tile) delete tile.trapId;
   run.traps.splice(idx, 1);
@@ -295,7 +366,7 @@ export function salvageGear(run: RunState, itemId: string): ActionResult {
     if (u.gear.armor === itemId) u.gear.armor = undefined;
     u.gear.accessory = (u.gear.accessory ?? []).filter((i) => i !== itemId);
   }
-  refund(run, salvageValue(item.tier, item.quality));
+  refund(run, run.idle ? item.paidEmbers ?? 0 : salvageValue(item.tier, item.quality));
   run.inventory.splice(idx, 1);
   return null;
 }
@@ -305,16 +376,18 @@ export function buyGear(run: RunState, itemId: string): ActionResult {
   const idx = run.gearShop.findIndex((g) => g.id === itemId);
   if (idx < 0) return "Item no longer available";
   const item = run.gearShop[idx];
-  if (!spend(run, gearPrice(item.tier, item.quality))) return "Not enough DP";
+  const cost = dungeonPrice(run, gearPrice(item.tier, item.quality));
+  if (!spend(run, cost)) return insufficient(run);
   run.gearShop.splice(idx, 1);
+  if (run.idle) item.paidEmbers = cost;
   run.inventory.push(item);
   return null;
 }
 
 export function rerollGearShop(run: RunState, free = false): ActionResult {
   if (run.core.level < 3) return "Gear Shop unlocks at Core Level 3";
-  const cost = 15;
-  if (!free && !spend(run, cost)) return "Not enough DP";
+  const cost = dungeonPrice(run, 15);
+  if (!free && !spend(run, cost)) return insufficient(run);
   run.gearShop = generateShopStock(run);
   return null;
 }
@@ -340,7 +413,7 @@ export function buyResearch(run: RunState, nodeId: string): ActionResult {
   for (const p of node.prereqs) {
     if (!run.research.owned.includes(p)) return "Requires prerequisite research";
   }
-  if (!spend(run, node.cost)) return "Not enough DP";
+  if (!spend(run, dungeonPrice(run, node.cost))) return insufficient(run);
   if (!run.research.owned.includes(nodeId)) run.research.owned.push(nodeId);
   run.research.ranks[nodeId] = currentRank + 1;
   return null;
@@ -350,7 +423,7 @@ export function buyResearch(run: RunState, nodeId: string): ActionResult {
 export function upgradeCore(run: RunState): ActionResult {
   if (run.core.level >= 20) return "Core is at maximum level";
   const next = coreLevelRow(run.core.level + 1);
-  if (!spend(run, clUpgradeCost(run.core.level))) return "Not enough DP";
+  if (!spend(run, dungeonPrice(run, clUpgradeCost(run.core.level)))) return insufficient(run);
   const hpDelta = next.coreHp - run.core.maxHp;
   run.core.level += 1;
   run.core.maxHp = next.coreHp;

@@ -11,6 +11,7 @@ export function ProfileView({ onClose }: { onClose: () => void }) {
   const [info, setInfo] = useState<{ email: string | null; isAnonymous: boolean; uid: string } | null>(null);
 
   useEffect(() => {
+    if (!auth) return;
     return onAuthStateChanged(auth, (u) => {
       setInfo(u ? { email: u.email, isAnonymous: u.isAnonymous, uid: u.uid } : null);
     });
@@ -35,10 +36,11 @@ export function ProfileView({ onClose }: { onClose: () => void }) {
         <div className="hint">
           {!info ? "Local mode (no cloud account)." :
             signedIn ? `Signed in as ${info.email}` :
-              "Playing as Guest (anonymous). Sign in to save progress to the cloud and use it across devices."}
+              "Playing as a guest. Sign in to access your profile on other devices."}
         </div>
 
-        {!signedIn && (
+        {!auth && <p>Progress is stored in this browser.</p>}
+        {auth && !signedIn && (
           <>
             <div className="section-title">Email</div>
             <input className="card" style={{ width: "100%", marginBottom: 6 }} placeholder="email"
@@ -59,9 +61,6 @@ export function ProfileView({ onClose }: { onClose: () => void }) {
         )}
 
         {err && <div className="toast" style={{ position: "static", marginTop: 10 }}>{err}</div>}
-        <div className="small" style={{ marginTop: 10 }}>
-          More account & H2H settings are coming here later (display name, sharing, ladder).
-        </div>
       </div>
     </div>
   );

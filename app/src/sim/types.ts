@@ -137,6 +137,8 @@ export interface UniqueDef {
   name: string;
   baseClassId: string;
   flavor: string;
+  signature: Ability[];
+  revealRadius?: number;
 }
 
 // ----------------------------------------------------------------------------
@@ -216,6 +218,7 @@ export interface Affix {
 }
 
 export interface GearItem {
+  paidEmbers?: number;
   id: string;          // instance id
   defId: string;       // catalog def
   name: string;
@@ -293,6 +296,7 @@ export interface MapTile {
   state: Exclude<TileState, "stone">;
   unitId?: string;
   trapId?: string;
+  excavationRefund?: number;
 }
 
 export interface DungeonMap {
@@ -308,6 +312,7 @@ export interface DungeonMap {
 // Placed instances + run state (docs/13)
 // ----------------------------------------------------------------------------
 export interface PlacedUnit {
+  paidEmbers?: number;
   id: string;            // instance id
   defId: string;
   x: number;
@@ -317,6 +322,7 @@ export interface PlacedUnit {
 }
 
 export interface PlacedTrap {
+  paidEmbers?: number;
   id: string;
   defId: string;
   x: number;
@@ -359,6 +365,13 @@ export interface RunState {
   modifiers: NGModifier[];
   simVersion: string;
   stats: RunStats;
+  swiftRule?: import("./kingdom").SwiftRule;
+  chosenFaction?: Family;
+  cityId?: string;
+  practice?: boolean;
+  buildings?: import("./kingdom").BuildingLevels;
+  monsterRanks?: Record<string, number>;
+  idle?: import("./idle").IdleProgress;
 }
 
 // Frozen dungeon for snapshots / H2H (docs/12, 13)
@@ -398,6 +411,7 @@ export interface SimEntity {
   archetype?: Archetype;
   tier: Tier;
   isUnique?: boolean;
+  uniqueId?: string;
   isTurret?: boolean;
   x: number;
   y: number;
@@ -433,7 +447,7 @@ export interface SimEntity {
 export type SimEventType =
   | "spawn" | "move" | "attack" | "hit" | "miss" | "crit" | "status"
   | "trapTrigger" | "death" | "drop" | "coreHit" | "heal" | "summon"
-  | "reveal" | "waveStart" | "waveEnd";
+  | "reveal" | "ability" | "waveStart" | "waveEnd";
 
 export interface SimEvent {
   tick: number;
@@ -473,6 +487,7 @@ export interface EntityMeta {
   name: string;
   tier: Tier;
   isUnique: boolean;
+  uniqueId?: string;
   family?: Family;
   archetype?: Archetype;
 }
@@ -504,6 +519,7 @@ export interface WaveInvader {
   isUnique: boolean;
   uniqueId?: string;
   statMult: number;
+  monster?: { stats: ResolvedStats; spawnTick: number };
 }
 
 export interface WaveDef {
